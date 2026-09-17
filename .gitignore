@@ -1,0 +1,13 @@
+node_modules
+out
+dist
+dist-web
+.DS_Store
+*.log
+test-results
+playwright-report
+e2e/screenshots/*.png
+.overlook
+*.tsbuildinfo
+build/icon.iconset
+docs/drafts/

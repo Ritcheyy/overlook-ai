@@ -1,0 +1,184 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: 11 13 18;
+  --surface: 17 20 27;
+  --raised: 24 28 37;
+  --line: 38 43 56;
+  --ink: 232 234 240;
+  --muted: 150 157 175;
+  --faint: 96 103 122;
+  --accent: 124 138 255;
+  --amber: 245 181 68;
+  --teal: 79 209 197;
+  --rose: 244 114 140;
+  --lime: 163 230 53;
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  @apply bg-bg text-ink font-sans antialiased;
+  font-size: 13px;
+  overflow: hidden;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgb(var(--line));
+  border-radius: 8px;
+  border: 2px solid rgb(var(--bg));
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+:focus-visible {
+  outline: 2px solid rgb(var(--accent) / 0.55);
+  outline-offset: 1px;
+}
+
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+.animate-pulse-soft {
+  animation: pulse-soft 1.6s ease-in-out infinite;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-toast-in {
+  animation: toast-in 160ms ease-out;
+}
+
+/* Rendered markdown (finding bodies, suggestions, posted comments). */
+.md {
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.md > :first-child {
+  margin-top: 0;
+}
+.md > :last-child {
+  margin-bottom: 0;
+}
+.md p {
+  margin: 0 0 0.5em;
+}
+.md h1,
+.md h2,
+.md h3,
+.md h4 {
+  font-weight: 600;
+  margin: 0.9em 0 0.3em;
+  font-size: 13px;
+  color: rgb(var(--ink));
+}
+.md h1 {
+  font-size: 15px;
+}
+.md h2 {
+  font-size: 14px;
+}
+.md code {
+  font-family: theme(fontFamily.mono);
+  font-size: 12px;
+  background: rgb(var(--raised));
+  border: 1px solid rgb(var(--line));
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.md pre {
+  background: rgb(var(--bg));
+  border: 1px solid rgb(var(--line));
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 0.5em 0;
+  overflow-x: auto;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.md pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+}
+.md ul,
+.md ol {
+  padding-left: 1.3em;
+  margin: 0.3em 0 0.5em;
+}
+.md ul {
+  list-style: disc;
+}
+.md ol {
+  list-style: decimal;
+}
+.md li + li {
+  margin-top: 0.15em;
+}
+.md a {
+  color: rgb(var(--accent));
+  text-decoration: none;
+}
+.md a:hover {
+  text-decoration: underline;
+}
+.md blockquote {
+  border-left: 2px solid rgb(var(--line));
+  padding-left: 0.75em;
+  margin: 0.5em 0;
+  color: rgb(var(--muted));
+}
+.md table {
+  border-collapse: collapse;
+  font-size: 12px;
+  margin: 0.5em 0;
+}
+.md th,
+.md td {
+  border: 1px solid rgb(var(--line));
+  padding: 2px 8px;
+  text-align: left;
+}
+.md th {
+  background: rgb(var(--raised));
+  font-weight: 600;
+}
+.md hr {
+  border: 0;
+  border-top: 1px solid rgb(var(--line));
+  margin: 0.75em 0;
+}
+.md input[type='checkbox'] {
+  margin-right: 0.4em;
+}
+.md strong {
+  font-weight: 600;
+  color: rgb(var(--ink));
+}

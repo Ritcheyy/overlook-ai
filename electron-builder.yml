@@ -1,0 +1,24 @@
+appId: com.overlook.app
+productName: Overlook
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/**
+  - resources/**
+  - package.json
+asar: true
+npmRebuild: false
+mac:
+  category: public.app-category.developer-tools
+  icon: build/icon.icns
+  target:
+    - target: dir
+      arch: arm64
+  # Local, unsigned build: no Developer ID, no notarisation.
+  identity: null
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  darkModeSupport: true
+  extendInfo:
+    NSHumanReadableCopyright: ''

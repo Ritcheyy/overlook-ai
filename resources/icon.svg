@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#181c2a"/>
+      <stop offset="1" stop-color="#0b0d12"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.42" r="0.5">
+      <stop offset="0" stop-color="#f5b544" stop-opacity="0.55"/>
+      <stop offset="0.55" stop-color="#f5b544" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#f5b544" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="slabTop" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3a4160"/>
+      <stop offset="1" stop-color="#262b3e"/>
+    </linearGradient>
+    <linearGradient id="head" x1="0.3" y1="0" x2="0.7" y2="1">
+      <stop offset="0" stop-color="#fff6e6"/>
+      <stop offset="1" stop-color="#e9d9bd"/>
+    </linearGradient>
+    <clipPath id="tile"><rect x="0" y="0" width="1024" height="1024" rx="224"/></clipPath>
+  </defs>
+  <g clip-path="url(#tile)">
+    <rect width="1024" height="1024" fill="url(#bg)"/>
+    <rect width="1024" height="1024" fill="url(#glow)"/>
+    <!-- window light on the back wall -->
+    <rect x="700" y="150" width="150" height="150" rx="18" fill="#7c8aff" opacity="0.28"/>
+    <rect x="714" y="164" width="56" height="56" rx="6" fill="#b9c1ff" opacity="0.55"/>
+    <rect x="792" y="164" width="44" height="56" rx="6" fill="#b9c1ff" opacity="0.55"/>
+    <rect x="714" y="236" width="56" height="50" rx="6" fill="#b9c1ff" opacity="0.55"/>
+    <rect x="792" y="236" width="44" height="50" rx="6" fill="#b9c1ff" opacity="0.55"/>
+    <!-- floating isometric slab -->
+    <polygon points="512,560 872,740 512,920 152,740" fill="#12151f"/>
+    <polygon points="512,530 872,710 512,890 152,710" fill="url(#slabTop)"/>
+    <polygon points="152,710 512,890 512,930 152,750" fill="#1b1f2e"/>
+    <polygon points="872,710 512,890 512,930 872,750" fill="#141826"/>
+    <!-- character shadow -->
+    <ellipse cx="512" cy="770" rx="150" ry="34" fill="#000" opacity="0.28"/>
+    <!-- body -->
+    <rect x="392" y="560" width="240" height="200" rx="110" fill="#f5b544"/>
+    <!-- headphones band -->
+    <path d="M338 430 A174 174 0 0 1 686 430" fill="none" stroke="#f5b544" stroke-width="30" stroke-linecap="round"/>
+    <!-- head -->
+    <circle cx="512" cy="450" r="174" fill="url(#head)"/>
+    <!-- ear cups -->
+    <rect x="312" y="410" width="54" height="110" rx="27" fill="#f5b544"/>
+    <rect x="658" y="410" width="54" height="110" rx="27" fill="#f5b544"/>
+    <!-- eyes, looking slightly up and out: overlooking -->
+    <ellipse cx="454" cy="440" rx="26" ry="40" fill="#1a1d2b"/>
+    <ellipse cx="570" cy="440" rx="26" ry="40" fill="#1a1d2b"/>
+    <circle cx="463" cy="426" r="9" fill="#fff" opacity="0.9"/>
+    <circle cx="579" cy="426" r="9" fill="#fff" opacity="0.9"/>
+    <!-- antenna with state light -->
+    <line x1="512" y1="276" x2="512" y2="232" stroke="#f5b544" stroke-width="16" stroke-linecap="round"/>
+    <circle cx="512" cy="214" r="26" fill="#4fd1c5"/>
+    <circle cx="512" cy="214" r="46" fill="#4fd1c5" opacity="0.25"/>
+  </g>
+</svg>
