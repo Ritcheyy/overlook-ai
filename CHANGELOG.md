@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- The Review card beside a PR's details names the model and effort of the round on screen. The model id is saved as soon as Claude Code names it, so a running or failed round shows the id instead of the alias.
+
 ## 0.2.0
 
 - Every pull request opens its details in the app, from the Inbox, the floor, the Log and notifications; GitHub is a labelled icon, never the default click. Unreviewed PRs open the same screen with the review options.

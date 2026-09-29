@@ -23,6 +23,8 @@ class GateRunner implements RunnerPort {
   block = false
   /** Thrown in place of the next result, after the scripted activity. */
   failWith?: Error
+  /** Reported before blocking, the way the CLI names its model at the start. */
+  modelFirst?: string
   private waiters: Array<() => void> = []
 
   get calls(): ReviewRequest[] {
@@ -31,6 +33,7 @@ class GateRunner implements RunnerPort {
 
   async review(req: ReviewRequest): Promise<ReviewResult> {
     this.started.push(req)
+    if (this.modelFirst) req.onModel?.(this.modelFirst)
     if (this.block) {
       await new Promise<void>((resolve, reject) => {
         const onAbort = () => reject(new Error('aborted'))
@@ -504,15 +507,28 @@ describe('engine', () => {
     h.runner.inner.failNext = true
     const b = await h.api.dispatch({ prId: PR_1203 })
     const failed = await waitForState(h, b.id, 'failed')
-    expect(failed.rounds[0]).toMatchObject({ model: 'opus', effort: 'high' })
+    expect(failed.rounds[0]).toMatchObject({ model: 'demo-reviewer', effort: 'high' })
+  })
+
+  it('records the model the runner reports while the review is still running', async () => {
+    const h = await makeEngine({ settings: { claudeModel: 'opus' } })
+    h.runner.block = true
+    h.runner.modelFirst = 'claude-opus-5-5'
+    const a = await h.api.dispatch({ prId: PR_412 })
+    const running = await waitFor(h, (s) => missionOf(s, a.id).rounds[0]?.model === 'claude-opus-5-5')
+    expect(missionOf(running, a.id).state).toBe('reviewing')
+    h.runner.release()
+    await waitForState(h, a.id, 'needs_you')
   })
 
   it('labels the CLI default model and effort on the round', async () => {
     const h = await makeEngine({ settings: { claudeModel: '', claudeEffort: undefined } })
-    h.runner.inner.failNext = true
+    h.runner.block = true
     const a = await h.api.dispatch({ prId: PR_412 })
-    const failed = await waitForState(h, a.id, 'failed')
-    expect(failed.rounds[0]).toMatchObject({ model: 'default', effort: 'default' })
+    const reviewing = await waitForState(h, a.id, 'reviewing')
+    expect(reviewing.rounds[0]).toMatchObject({ model: 'default', effort: 'default' })
+    h.runner.release()
+    await waitForState(h, a.id, 'needs_you')
   })
 
   it('clears the retired slash command from persisted loadouts but keeps a user-entered message', async () => {

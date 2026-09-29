@@ -26,6 +26,7 @@ export class MockRunner implements RunnerPort {
     this.calls.push(req)
     const script = demoReviewFor(req.mission.prId)
     const started = Date.now()
+    req.onModel?.('demo-reviewer')
     for (const step of script.activity) {
       req.onActivity?.({ kind: step.kind, text: step.text })
       await sleep(this.stepMs, req.signal)

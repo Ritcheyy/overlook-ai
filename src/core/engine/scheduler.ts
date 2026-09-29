@@ -376,7 +376,11 @@ export class Scheduler {
         ...(workspace && { workspace }),
         settings: clone(settings),
         signal,
-        onActivity: (a) => this.emitActivity(mission.id, a.kind, a.text)
+        onActivity: (a) => this.emitActivity(mission.id, a.kind, a.text),
+        onModel: (model) => {
+          round!.model = model
+          this.changed()
+        }
       })
       throwIfAborted(signal)
 

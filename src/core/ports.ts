@@ -93,6 +93,8 @@ export interface ReviewRequest {
   settings: Settings
   signal?: AbortSignal
   onActivity?: (activity: Omit<Activity, 'missionId' | 'at'>) => void
+  /** The model id the runner resolved, as soon as it is known rather than when the review ends. */
+  onModel?: (model: string) => void
 }
 
 export interface ReviewResult {
