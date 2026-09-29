@@ -15,7 +15,7 @@ import {
 } from '@/state/store'
 import type { VisualState } from './animation'
 import { visualStateFor } from './animation'
-import { failedMissionForSlot, floorIsEmpty, selectStaleMissions } from './floor-selectors'
+import { failedMissionForSlot, floorIsEmpty, orderWatching, selectStaleMissions } from './floor-selectors'
 
 export interface SlotView {
   slot: Slot
@@ -55,12 +55,14 @@ export function useQueue(): Mission[] {
   return useAppStore(useShallow(selectQueue))
 }
 
+/** Watched missions, updates first. */
 export function useWatching(): Mission[] {
-  return useAppStore(useShallow(selectMissionsInState('watching')))
+  const watching = useAppStore(useShallow(selectMissionsInState('watching')))
+  return useMemo(() => orderWatching(watching), [watching])
 }
 
-/** Watching or waiting missions whose latest push nobody has reviewed. */
-export function useNewPushCount(): number {
+/** Missions with a push or a reply nobody has reviewed. */
+export function useUpdateCount(): number {
   return useAppStore((s) => selectStaleMissions(s.snapshot?.missions ?? []).length)
 }
 

@@ -40,7 +40,7 @@ function LoadoutEditor({
     <div className={cn('flex flex-col gap-2 border-b border-line/60 py-3 last:border-0')}>
       <div className="flex flex-wrap items-center gap-2">
         <TextField
-          aria-label="Loadout name"
+          aria-label="Review type name"
           value={loadout.name}
           onSave={(name) => onChange({ name: name.trim() || loadout.name })}
           wrapperClassName="w-[220px]"
@@ -63,8 +63,8 @@ function LoadoutEditor({
         </IconButton>
       </div>
       <TextField
-        aria-label="Loadout tagline"
-        placeholder="One line on what this loadout looks for"
+        aria-label="Review type tagline"
+        placeholder="One line on what this review type looks for"
         value={loadout.tagline}
         onSave={(tagline) => onChange({ tagline })}
       />
@@ -84,7 +84,7 @@ function LoadoutEditor({
         </div>
       </div>
       <Textarea
-        aria-label="Loadout prompt"
+        aria-label="Review type prompt"
         mono
         className="min-h-[140px]"
         placeholder="Instructions appended to the review prompt"
@@ -101,7 +101,7 @@ function LoadoutEditor({
 export function LoadoutsSection({ settings, save }: { settings: Settings; save: Save }) {
   const update = (id: string, patch: Partial<Loadout>) => save({ loadouts: settings.loadouts.map((l) => (l.id === id ? { ...l, ...patch } : l)) })
   const add = () => {
-    const l: Loadout = { id: `custom-${nanoid(6)}`, name: 'Custom loadout', tagline: '', prompt: '', builtIn: false }
+    const l: Loadout = { id: `custom-${nanoid(6)}`, name: 'Custom review', tagline: '', prompt: '', builtIn: false }
     void save({ loadouts: [...settings.loadouts, l] })
   }
   const remove = (id: string) => {
@@ -116,9 +116,9 @@ export function LoadoutsSection({ settings, save }: { settings: Settings; save: 
   }
   return (
     <Section
-      id="loadouts"
-      title="Loadouts"
-      description="A loadout is the review style a character takes to a pull request. The prompt is appended to the base review instructions."
+      id="review-types"
+      title="Review types"
+      description="A review type is the style a reviewer takes to a pull request. Its prompt is appended to the base review instructions."
       actions={
         <Button size="sm" variant="secondary" icon={<Plus className="h-3.5 w-3.5" />} onClick={add}>
           Add custom

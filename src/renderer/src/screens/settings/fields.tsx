@@ -6,6 +6,7 @@ import { cn } from '@/lib/cn'
 import { useAppStore } from '@/state/store'
 import { Card } from '@/components/ui/Card'
 import { Input, type InputProps } from '@/components/ui/Input'
+import { Textarea } from '@/components/ui/Textarea'
 
 export type Save = (patch: Partial<Settings>) => Promise<void>
 
@@ -80,25 +81,49 @@ export interface TextFieldProps extends Omit<InputProps, 'value' | 'onChange' | 
   onSave: (value: string) => void
 }
 
+/** A short-lived note beside a field: that it saved, or what it changed the value to. */
+function useFieldNote(): [ReactNode, (note: ReactNode) => void] {
+  const [note, setNote] = useState<ReactNode>(null)
+  useEffect(() => {
+    if (!note) return
+    const t = setTimeout(() => setNote(null), 2500)
+    return () => clearTimeout(t)
+  }, [note])
+  return [note, setNote]
+}
+
+const SAVED = (
+  <span className="inline-flex items-center gap-1 text-[11.5px] text-lime" role="status">
+    <Check className="h-3 w-3" aria-hidden />
+    Saved
+  </span>
+)
+
 /** Controlled locally; commits on blur or Enter only when the value changed. */
 export function TextField({ value, onSave, onKeyDown, ...rest }: TextFieldProps) {
   const [draft, setDraft] = useState(value)
+  const [note, setNote] = useFieldNote()
   useEffect(() => setDraft(value), [value])
   const commit = () => {
-    if (draft !== value) onSave(draft)
+    if (draft === value) return
+    onSave(draft)
+    setNote(SAVED)
   }
   return (
-    <Input
-      {...rest}
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        onKeyDown?.(e)
-        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-        if (e.key === 'Escape') setDraft(value)
-      }}
-    />
+    <>
+      <Input
+        {...rest}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          onKeyDown?.(e)
+          if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+          if (e.key === 'Escape') setDraft(value)
+        }}
+      />
+      {note}
+    </>
   )
 }
 
@@ -113,34 +138,87 @@ export interface NumberFieldProps extends Omit<InputProps, 'value' | 'onChange' 
 
 export function NumberField({ value, onSave, min, max, step, integer, ...rest }: NumberFieldProps) {
   const [draft, setDraft] = useState(String(value))
+  const [note, setNote] = useFieldNote()
   useEffect(() => setDraft(String(value)), [value])
   const commit = () => {
-    let n = Number(draft)
-    if (draft.trim() === '' || !Number.isFinite(n)) {
+    const typed = Number(draft)
+    if (draft.trim() === '' || !Number.isFinite(typed)) {
       setDraft(String(value))
       return
     }
-    if (integer) n = Math.round(n)
+    let n = integer ? Math.round(typed) : typed
     if (min !== undefined) n = Math.max(min, n)
     if (max !== undefined) n = Math.min(max, n)
-    if (n !== value) onSave(n)
-    else setDraft(String(value))
+    const adjusted =
+      n !== typed ? (
+        <span className="text-[11.5px] text-amber" role="status">
+          {min !== undefined && typed < min ? `Set to ${n}, the minimum` : max !== undefined && typed > max ? `Set to ${n}, the maximum` : `Set to ${n}`}
+        </span>
+      ) : undefined
+    setDraft(String(n))
+    if (n !== value) {
+      onSave(n)
+      setNote(adjusted ?? SAVED)
+    } else if (adjusted) {
+      setNote(adjusted)
+    }
   }
   return (
-    <Input
-      {...rest}
-      type="number"
-      inputMode={integer ? 'numeric' : 'decimal'}
-      min={min}
-      max={max}
-      step={step}
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-        if (e.key === 'Escape') setDraft(String(value))
-      }}
-    />
+    <>
+      <Input
+        {...rest}
+        type="number"
+        inputMode={integer ? 'numeric' : 'decimal'}
+        min={min}
+        max={max}
+        step={step}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+          if (e.key === 'Escape') setDraft(String(value))
+        }}
+      />
+      {note}
+    </>
   )
 }
+
+export interface TextAreaFieldProps {
+  id?: string
+  value: string
+  placeholder?: string
+  rows?: number
+  onSave: (value: string) => void
+}
+
+/** Like TextField, for text too long for one line. */
+export function TextAreaField({ id, value, placeholder, rows = 2, onSave }: TextAreaFieldProps) {
+  const [draft, setDraft] = useState(value)
+  const [note, setNote] = useFieldNote()
+  useEffect(() => setDraft(value), [value])
+  const commit = () => {
+    if (draft === value) return
+    onSave(draft)
+    setNote(SAVED)
+  }
+  return (
+    <>
+      <Textarea
+        id={id}
+        rows={rows}
+        placeholder={placeholder}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') setDraft(value)
+        }}
+        className="text-[12.5px]"
+      />
+      {note}
+    </>
+  )
+}
+

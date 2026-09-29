@@ -3,7 +3,7 @@ import { buildComment } from './comment-builder'
 import { defaultSettings } from './loadouts'
 import { HEAD_SHA, PREV_SHA, makeFinding, makeMission, makeRound } from './review/test-helpers'
 
-const settings = defaultSettings({ signature: '' })
+const settings = defaultSettings({ signature: '', replyRequest: '' })
 const mission = makeMission()
 const blob = (file: string, line?: number) =>
   `https://github.com/acme/checkout-api/blob/${HEAD_SHA}/${file}${line ? `#L${line}` : ''}`
@@ -33,8 +33,8 @@ describe('buildComment', () => {
         '',
         'One real bug.',
         '',
+        '#### 1. Key collision',
         `**Blocker** · correctness · [src/refunds/refund.service.ts:48](${blob('src/refunds/refund.service.ts', 48)})`,
-        '**Key collision**',
         '',
         'Two refunds collide.',
         '',
@@ -59,8 +59,8 @@ describe('buildComment', () => {
       ]
     })
     const out = buildComment({ mission, round, settings })
-    expect(out).toContain(`**Major** · integration · [src/cart/usePromoCode.ts:41](${blob('src/cart/usePromoCode.ts', 41)}) · relates to acme/checkout-api#419\n**Promo re-apply assumes seconds**`)
-    expect(out).toContain('**Minor** · integration · relates to acme/checkout-api#420\n**No location**')
+    expect(out).toContain(`#### 1. Promo re-apply assumes seconds\n**Major** · integration · [src/cart/usePromoCode.ts:41](${blob('src/cart/usePromoCode.ts', 41)}) · relates to acme/checkout-api#419`)
+    expect(out).toContain('#### 2. No location\n**Minor** · integration · relates to acme/checkout-api#420')
   })
 
   it('never includes the briefing', () => {
@@ -86,8 +86,8 @@ describe('buildComment', () => {
       ]
     })
     const out = buildComment({ mission, round, settings })
-    const titles = [...out.matchAll(/^\*\*(.+)\*\*$/gm)].map((m) => m[1])
-    expect(titles).toEqual(['Blocker', 'Major A', 'Major Z', 'Major no file', 'Nit B', 'Praise'])
+    const titles = [...out.matchAll(/^#### (\d+)\. (.+)$/gm)].map((m) => `${m[1]} ${m[2]}`)
+    expect(titles).toEqual(['1 Blocker', '2 Major A', '3 Major Z', '4 Major no file', '5 Nit B', '6 Praise'])
     expect(out).not.toContain('Major dropped')
     expect(out).not.toContain('Blocker pending')
     expect(out).toContain('· 6 findings')
@@ -103,8 +103,8 @@ describe('buildComment', () => {
     })
     const out = buildComment({ mission, round, settings })
     expect(out).toContain('**Comments** · 2 findings')
-    expect(out).toContain(`**Minor** · product · [src/x.ts](${blob('src/x.ts')})\n**Whole file**`)
-    expect(out).toContain('**Minor** · other\n**Nowhere**')
+    expect(out).toContain(`#### 1. Whole file\n**Minor** · product · [src/x.ts](${blob('src/x.ts')})`)
+    expect(out).toContain('#### 2. Nowhere\n**Minor** · other')
     expect(out).not.toContain('#L')
   })
 
@@ -137,6 +137,12 @@ describe('buildComment', () => {
     expect(out.endsWith('---\nBlind review · Reviewed by Nova · Posted automatically\n')).toBe(true)
   })
 
+  it('credits the person who approved when an auto-post mission is posted by hand', () => {
+    const round = makeRound({ verdict: 'approve', summary: 'Clean.' })
+    const out = buildComment({ mission: makeMission({ preferredSlotId: 'slot-2', autoPost: true }), round, settings: defaultSettings(), login: 'ritchey', autoPosted: false })
+    expect(out.endsWith('---\nBlind review · Reviewed by Nova · Findings approved by ritchey\n')).toBe(true)
+  })
+
   it('falls back to "you" and "a reviewer" when the login and slot are unknown', () => {
     const round = makeRound({ verdict: 'approve', summary: 'Clean.' })
     const out = buildComment({ mission, round, settings: defaultSettings() })
@@ -145,9 +151,9 @@ describe('buildComment', () => {
 
   it('fills every placeholder and blanks unknown ones', () => {
     const round = makeRound({ id: 'round-2', index: 2, previousHeadSha: PREV_SHA, verdict: 'approve', summary: 'Clean.' })
-    const template = '{round}/{sha}/{login}/{loadout}/{character}/{approval}/{nope}/{}'
+    const template = '{round}/{sha}/{login}/{type}/{reviewer}/{loadout}/{character}/{approval}/{nope}/{}'
     const out = buildComment({ mission: makeMission({ slotId: 'slot-1' }), round, settings: defaultSettings({ signature: template }), login: 'ritchey' })
-    expect(out.endsWith('---\n2/a1b2c3d/ritchey/Blind review/Vhagar/Findings approved by ritchey//{}\n')).toBe(true)
+    expect(out.endsWith('---\n2/a1b2c3d/ritchey/Blind review/Vhagar/Blind review/Vhagar/Findings approved by ritchey//{}\n')).toBe(true)
     expect(buildComment({ mission, round, settings: defaultSettings({ signature: ' {nope} ' }) })).not.toContain('---')
   })
 
@@ -163,5 +169,51 @@ describe('buildComment', () => {
     const round = makeRound({ findings: [makeFinding({ file: 'docs/my file.md', line: 3 })] })
     const out = buildComment({ mission, round, settings })
     expect(out).toContain(`[docs/my file.md:3](${blob('docs/my%20file.md', 3)})`)
+  })
+
+  it('asks for a disposition reply with a copyable table when it posts findings', () => {
+    const round = makeRound({
+      findings: [
+        makeFinding({ severity: 'praise', title: 'Nice guard' }),
+        makeFinding({ severity: 'major', title: 'Key | collision', file: 'a.ts', line: 3 }),
+        makeFinding({ severity: 'minor', title: 'Dropped one', decision: 'dropped' })
+      ]
+    })
+    const out = buildComment({ mission, round, settings: defaultSettings({ signature: 'Sig', replyRequest: 'Reply with a disposition.' }) })
+    expect(out).toContain(
+      [
+        '',
+        'Reply with a disposition.',
+        '',
+        '<details>',
+        '<summary>Reply template</summary>',
+        '',
+        '```markdown',
+        '### Round 1 findings: disposition',
+        '',
+        '| # | Finding | Outcome |',
+        '| --- | --- | --- |',
+        '| 1 | Key \\| collision |  |',
+        '| 2 | Nice guard | — |',
+        '```',
+        '',
+        '</details>',
+        '',
+        '---',
+        'Sig',
+        ''
+      ].join('\n')
+    )
+    expect(out).not.toContain('Dropped one')
+  })
+
+  it('leaves the reply request out when nothing needs an answer or it is switched off', () => {
+    const praiseOnly = makeRound({ findings: [makeFinding({ severity: 'praise', title: 'Nice guard' })] })
+    expect(buildComment({ mission, round: praiseOnly, settings: defaultSettings() })).not.toContain('Reply template')
+    const clean = makeRound({ verdict: 'approve', summary: 'Clean.' })
+    expect(buildComment({ mission, round: clean, settings: defaultSettings() })).not.toContain('Reply template')
+    const withFinding = makeRound({ findings: [makeFinding({ title: 'Key collision' })] })
+    expect(buildComment({ mission, round: withFinding, settings: defaultSettings() })).toContain('Reply template')
+    expect(buildComment({ mission, round: withFinding, settings: defaultSettings({ replyRequest: '  ' }) })).not.toContain('Reply template')
   })
 })

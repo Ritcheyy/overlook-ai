@@ -27,9 +27,9 @@ export function findings(page: Page): Locator {
   return page.getByRole('list', { name: 'Findings' }).getByRole('listitem')
 }
 
-/** The rail badge on Triage reads "<n> missions need you". */
+/** The rail badge on Triage reads "<n> reviews need you". */
 export function needsYouBadge(page: Page, count: number): Locator {
-  return rail(page).getByLabel(`${count} missions need you`)
+  return rail(page).getByLabel(`${count} reviews need you`)
 }
 
 /** Sends a seed PR to the floor from the inbox and waits for its row to switch to a mission chip. */

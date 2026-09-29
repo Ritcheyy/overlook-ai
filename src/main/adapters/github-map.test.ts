@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mapDetailToPullRequest, mapPrState, parsePrDetail, parseSearchResults, searchItemId } from './github-map'
+import { mapDetailToPullRequest, mapPrState, mapReviewDecision, parsePrDetail, parseSearchResults, searchItemId } from './github-map'
 
 const searchPayload = [
   {
@@ -128,5 +128,17 @@ describe('mapDetailToPullRequest', () => {
     expect(pr.author).toBe('ghost')
     expect(pr.body).toBeUndefined()
     expect(pr.mine).toBe(false)
+  })
+})
+
+describe('mapReviewDecision', () => {
+  it("maps GitHub's decision and leaves an empty one out", () => {
+    expect(mapReviewDecision('APPROVED')).toBe('approved')
+    expect(mapReviewDecision('CHANGES_REQUESTED')).toBe('changes_requested')
+    expect(mapReviewDecision('REVIEW_REQUIRED')).toBe('review_required')
+    expect(mapReviewDecision('')).toBeUndefined()
+    expect(mapReviewDecision(null)).toBeUndefined()
+    const pr = mapDetailToPullRequest('acme/checkout-api', parsePrDetail(JSON.stringify({ ...detailPayload, reviewDecision: '' })))
+    expect('reviewDecision' in pr).toBe(false)
   })
 })

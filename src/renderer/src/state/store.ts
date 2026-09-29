@@ -11,6 +11,18 @@ import { api, onPush } from '@/lib/api'
 
 export type Screen = 'floor' | 'inbox' | 'triage' | 'log' | 'settings'
 
+/** What the Triage list shows: everything, reviews with a push or reply nobody has looked at, or those waiting for decisions. */
+export type TriageFilter = 'all' | 'updates' | 'needs_you'
+
+export interface NavigateOptions {
+  missionId?: string
+  /** A pull request with no review yet; its details open with the review options. */
+  prId?: string
+  /** Settings section to scroll to. */
+  section?: string
+  triageFilter?: TriageFilter
+}
+
 export interface Toast {
   id: string
   kind: 'info' | 'success' | 'error'
@@ -28,11 +40,20 @@ export interface AppState {
   error?: string
   screen: Screen
   selectedMissionId?: string
+  /** Set with no mission when the details of an unreviewed PR are open. */
+  selectedPrId?: string
+  triageFilter: TriageFilter
+  /** Settings section the next Settings render scrolls to, then clears. */
+  settingsSection?: string
   /** Newest last, capped per mission. */
   activity: Record<string, Activity[]>
   toasts: Toast[]
-  navigate: (screen: Screen, opts?: { missionId?: string }) => void
+  navigate: (screen: Screen, opts?: NavigateOptions) => void
+  /** Opens the triage details of a PR: its live review when there is one, else the PR itself. */
+  openDetails: (target: { missionId?: string; prId?: string }) => void
   selectMission: (missionId?: string) => void
+  setTriageFilter: (filter: TriageFilter) => void
+  clearSettingsSection: () => void
   pushToast: (toast: Omit<Toast, 'id' | 'createdAt'>) => void
   dismissToast: (id: string) => void
   /** Load the first snapshot and subscribe to pushes. Safe to call once. */
@@ -48,12 +69,38 @@ export const useAppStore = create<AppState>((set, get) => ({
   snapshot: null,
   loading: true,
   screen: 'floor',
+  triageFilter: 'all',
   activity: {},
   toasts: [],
 
-  navigate: (screen, opts) => set({ screen, selectedMissionId: opts?.missionId ?? get().selectedMissionId }),
+  navigate: (screen, opts = {}) => {
+    const patch: Partial<AppState> = { screen }
+    if (opts.missionId) Object.assign(patch, { selectedMissionId: opts.missionId, selectedPrId: undefined })
+    else if (opts.prId) Object.assign(patch, { selectedMissionId: undefined, selectedPrId: opts.prId })
+    if (opts.section) patch.settingsSection = opts.section
+    if (opts.triageFilter) patch.triageFilter = opts.triageFilter
+    set(patch)
+  },
 
-  selectMission: (missionId) => set({ selectedMissionId: missionId }),
+  openDetails: ({ missionId, prId }) => {
+    const snapshot = get().snapshot
+    const missions = snapshot?.missions ?? []
+    const byId = missionId ? missions.find((m) => m.id === missionId) : undefined
+    const pr = prId ?? byId?.prId
+    if (!pr) return
+    const live = byId && byId.state !== 'closed' ? byId : missions.find((m) => m.prId === pr && m.state !== 'closed')
+    if (live) return set({ screen: 'triage', selectedMissionId: live.id, selectedPrId: undefined })
+    // An open PR shows as unreviewed; a merged or closed one only has its last review to show.
+    if (snapshot?.inbox.some((p) => p.id === pr)) return set({ screen: 'triage', selectedMissionId: byId?.id, selectedPrId: pr })
+    const closed = byId ?? [...missions].reverse().find((m) => m.prId === pr)
+    if (closed) set({ screen: 'triage', selectedMissionId: closed.id, selectedPrId: undefined })
+  },
+
+  selectMission: (missionId) => set({ selectedMissionId: missionId, selectedPrId: undefined }),
+
+  setTriageFilter: (triageFilter) => set({ triageFilter }),
+
+  clearSettingsSection: () => set({ settingsSection: undefined }),
 
   pushToast: (toast) => {
     const id = `toast-${++toastSeq}`
@@ -84,7 +131,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       })
     )
     onPush('navigate', (n) => {
-      set({ screen: n.screen, selectedMissionId: n.missionId ?? get().selectedMissionId })
+      if (n.screen === 'triage' && n.missionId) get().openDetails({ missionId: n.missionId })
+      else set({ screen: n.screen, selectedMissionId: n.missionId ?? get().selectedMissionId })
     })
     onPush('notification', (n: Notification) => {
       get().pushToast({ kind: 'info', title: n.title, body: n.body, missionId: n.missionId })

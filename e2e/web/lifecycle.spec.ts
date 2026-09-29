@@ -49,13 +49,13 @@ test('three PRs go through the floor, triage, posting, and the log', async ({ pa
   await expect(hudChip(page, 'slot-1')).toHaveText('Needs you')
   await expect(hudChip(page, 'slot-2')).toHaveText('Needs you')
   await expect(counter(page, 'needs you')).toHaveText('2 needs you')
-  // Findings waiting for triage still occupy the desk, so the third PR stays on the shelf.
+  // Findings waiting for triage still occupy the desk, so the third PR stays queued.
   await expect(counter(page, 'queued')).toHaveText('1 queued')
 
   await openTriage(page, 412)
   await expect(page.getByText('2 waiting')).toBeVisible()
   await expect(findings(page)).toHaveCount(4)
-  await expect(page.getByText('Request changes', { exact: true })).toBeVisible()
+  await expect(page.getByText('Changes requested', { exact: true }).first()).toBeVisible()
   await decide(page, BLOCKER, 'Approve')
   await decide(page, MAJOR, 'Approve')
   await decide(page, PRODUCT, 'Drop')
@@ -94,14 +94,17 @@ test('three PRs go through the floor, triage, posting, and the log', async ({ pa
   await expect(page.getByRole('status').filter({ hasText: 'Posted to #412' })).toBeVisible()
   await expect(watchingBanner(page)).toBeVisible()
   await expect(page.getByText('Posted comment')).toBeVisible()
-  await expect(page.getByText(EDITED_SUMMARY)).toBeVisible()
+  await expect(page.getByText(EDITED_SUMMARY).first()).toBeVisible()
   await expect(page.getByRole('button', { name: 'View on GitHub' })).toBeVisible()
-  await expect(page.getByText(NIT)).toHaveCount(0)
+  // The posted round keeps what was left out, marked as such.
+  await expect(findingCard(page, NIT)).toContainText('Not posted')
+  await expect(findingCard(page, PRODUCT)).toContainText('Dropped · Product decision')
+  await expect(findingCard(page, BLOCKER)).toContainText('Posted')
 
   // #1203 ships with checkout-api, so its review had the workspace in view and tied one finding to the reviewer's own API PR.
   await openTriage(page, 1203)
   await expect(findings(page)).toHaveCount(4)
-  await expect(page.getByText('Workspace: acme')).toBeVisible()
+  await expect(page.locator('aside[aria-label="Details"]')).toContainText('Workspaceacme')
   await expect(findingCard(page, INTEGRATION).getByRole('button', { name: 'depends on acme/checkout-api#419' })).toBeVisible()
   await screenshot(page, 'triage-workspace')
 
@@ -114,13 +117,13 @@ test('three PRs go through the floor, triage, posting, and the log', async ({ pa
   await expect(triageBadge(page)).toHaveText('2')
 
   await goTo(page, 'Log')
-  await expect(page.getByText('3 missions', { exact: true })).toBeVisible()
+  await expect(page.getByText('3 reviews', { exact: true })).toBeVisible()
   const row = logRow(page, 412)
   await expect(row.locator('[data-state="watching"]')).toBeVisible()
   await expect(row).toContainText('Vhagar')
   await expect(row).toContainText('Blind review')
   await expect(row.getByRole('button', { name: 'Open posted comment' })).toBeVisible()
-  await expect(row.getByRole('button', { name: 'Open pull request #412' })).toBeVisible()
+  await expect(row.getByRole('button', { name: 'Open #412 on GitHub' })).toBeVisible()
   await expect(logRow(page, 1203).locator('[data-state="needs_you"]')).toBeVisible()
   await expect(logRow(page, 58).locator('[data-state="needs_you"]')).toBeVisible()
   await screenshot(page, 'log')

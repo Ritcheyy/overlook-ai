@@ -14,10 +14,12 @@ import type {
   Notification,
   PullRequest,
   ReviewRound,
+  RoundTrigger,
+  RunOptions,
   Settings,
   Slot
 } from '../domain'
-import { latestRound, missionHoldsSlot, prIdOf } from '../domain'
+import { lastPostedRound, latestRound, missionHoldsSlot, prIdOf } from '../domain'
 import type {
   BulkFindingDecisionArgs,
   DispatchArgs,
@@ -28,6 +30,7 @@ import type {
 import type { Ports, WorkspaceContext } from '../ports'
 import { buildComment } from '../comment-builder'
 import { expandHome, parsePrId, worktreePathFor } from './paths'
+import { applyRunOptions, sanitizeRunOptions, trimReplies } from './run-options'
 import { buildWorkspaceContext, describeWorkspaceContext, workspaceFor } from './workspaces'
 
 export interface EngineState {
@@ -73,18 +76,6 @@ function throwIfAborted(signal: AbortSignal): void {
   if (signal.aborted) throw new Error('Cancelled')
 }
 
-/**
- * The round a follow-up builds on. Only a posted round counts: a failed or
- * abandoned round would make the runner (and the posted comment) claim a
- * follow-up on findings the author never saw.
- */
-function lastPostedRound(mission: Mission): ReviewRound | undefined {
-  for (let i = mission.rounds.length - 1; i >= 0; i--) {
-    if (mission.rounds[i].postedAt) return mission.rounds[i]
-  }
-  return undefined
-}
-
 /** Time a mission last entered `queued`; drives FIFO ordering within a priority band. */
 function queuedAt(mission: Mission): string {
   for (let i = mission.timeline.length - 1; i >= 0; i--) {
@@ -122,7 +113,7 @@ export class Scheduler {
 
   mustFind(missionId: string): Mission {
     const m = this.state.missions.find((x) => x.id === missionId)
-    if (!m) throw new Error(`Mission not found: ${missionId}`)
+    if (!m) throw new Error(`Review not found: ${missionId}`)
     return m
   }
 
@@ -231,10 +222,10 @@ export class Scheduler {
     const pr = await this.resolvePullRequest(args.prId)
     if (pr.state !== 'open') throw new Error(`#${pr.number} is ${pr.state}`)
     const active = this.state.missions.find((m) => m.prId === pr.id && m.state !== 'closed')
-    if (active) throw new Error(`#${pr.number} already has an active mission`)
+    if (active) throw new Error(`#${pr.number} already has an active review`)
     const { settings } = this.state
     const loadoutId = args.loadoutId ?? settings.defaultLoadoutId
-    if (!settings.loadouts.some((l) => l.id === loadoutId)) throw new Error(`Unknown loadout: ${loadoutId}`)
+    if (!settings.loadouts.some((l) => l.id === loadoutId)) throw new Error(`Unknown review type: ${loadoutId}`)
     const at = this.now()
     const mission: Mission = {
       id: nanoid(),
@@ -245,10 +236,14 @@ export class Scheduler {
       rounds: [],
       stale: false,
       autoPost: args.autoPost ?? settings.autoPostRepos.includes(pr.repo.fullName),
+      nextTrigger: 'dispatch',
       createdAt: at,
       updatedAt: at,
       timeline: [{ at, to: 'queued' }]
     }
+    // Options, auto-post included, are for this first run; follow-ups go back to the review's own settings.
+    const options = sanitizeRunOptions(args.options)
+    if (options) mission.runOptions = options
     this.state.missions.push(mission)
     this.changed()
     this.schedule()
@@ -307,7 +302,10 @@ export class Scheduler {
       this.transition(mission, 'preparing', undefined, { slotId })
       const { pr } = mission
       const { fullName } = pr.repo
-      const settings = this.state.settings
+      const runOptions = mission.runOptions
+      const settings = applyRunOptions(this.state.settings, runOptions)
+      const autoPost = runOptions?.autoPost ?? mission.autoPost
+      const trigger: RoundTrigger = mission.nextTrigger ?? (mission.rounds.length === 0 ? 'dispatch' : 'rerun')
       const localRepoPath = this.localRepoPath(fullName)
       if (!localRepoPath) {
         throw new Error(`No local checkout found for ${fullName}. Add its path in Settings > Repositories.`)
@@ -329,6 +327,7 @@ export class Scheduler {
       this.transition(mission, 'reviewing')
 
       const previousRound = lastPostedRound(mission)
+      const replies = previousRound ? repliesFor(mission, previousRound) : undefined
       round = {
         id: nanoid(),
         index: mission.rounds.length + 1,
@@ -340,10 +339,16 @@ export class Scheduler {
         verdict: 'comment',
         // An empty model is the CLI default; the runner replaces the alias with what the CLI resolved.
         model: settings.claudeModel || 'default',
-        effort: settings.claudeEffort ?? 'default'
+        effort: settings.claudeEffort ?? 'default',
+        budgetUsd: settings.maxBudgetUsdPerReview,
+        trigger
       }
+      if (replies) round.replies = replies
       if (workspace) round.workspaceName = workspace.name
       mission.rounds.push(round)
+      // The replies now belong to this round; the next poll recounts them from its post.
+      mission.nextTrigger = undefined
+      mission.authorReplies = undefined
       this.changed()
 
       // A follow-up reviews the delta since the posted round, which only the
@@ -358,7 +363,7 @@ export class Scheduler {
       }
       throwIfAborted(signal)
       const loadout = settings.loadouts.find((l) => l.id === mission.loadoutId)
-      if (!loadout) throw new Error(`Unknown loadout: ${mission.loadoutId}`)
+      if (!loadout) throw new Error(`Unknown review type: ${mission.loadoutId}`)
 
       const result = await runner.review({
         mission: clone(mission),
@@ -367,6 +372,7 @@ export class Scheduler {
         worktreePath: prepared.worktreePath,
         diff,
         previousRound: previousRound ? clone(previousRound) : undefined,
+        ...(replies && { replies: clone(replies) }),
         ...(workspace && { workspace }),
         settings: clone(settings),
         signal,
@@ -374,7 +380,9 @@ export class Scheduler {
       })
       throwIfAborted(signal)
 
-      const decision = mission.autoPost ? 'approved' : 'pending'
+      // The options were for this run; a retry after a failure keeps them.
+      mission.runOptions = undefined
+      const decision = autoPost ? 'approved' : 'pending'
       round.findings = result.findings.map((f): Finding => ({ ...f, id: nanoid(), decision }))
       round.summary = result.summary
       round.verdict = result.verdict
@@ -387,9 +395,9 @@ export class Scheduler {
       this.emitActivity(mission.id, 'done', `${countFindings(round.findings.length)}, verdict ${result.verdict}`)
       round.activity = this.activityTail(mission.id)
 
-      if (mission.autoPost) {
+      if (autoPost) {
         // A failed post already parked the mission in needs_you with the error.
-        await this.postRound(mission, round).catch(() => undefined)
+        await this.postRound(mission, round, { auto: true }).catch(() => undefined)
       } else {
         this.transition(mission, 'needs_you')
         this.notify({
@@ -464,15 +472,22 @@ export class Scheduler {
     return context
   }
 
-  private async postRound(mission: Mission, round: ReviewRound): Promise<{ url: string }> {
+  private async postRound(mission: Mission, round: ReviewRound, opts: { auto?: boolean } = {}): Promise<{ url: string }> {
     const { pr } = mission
-    const body = buildComment({ mission: clone(mission), round: clone(round), settings: clone(this.state.settings), login: this.state.githubLogin })
+    const body = buildComment({
+      mission: clone(mission),
+      round: clone(round),
+      settings: clone(this.state.settings),
+      login: this.state.githubLogin,
+      autoPosted: opts.auto ?? false
+    })
     this.transition(mission, 'posting')
     try {
       const { url } = await this.ports.github.postComment(pr.repo.fullName, pr.number, body)
       round.postedAt = this.now()
       round.postedCommentUrl = url
       round.postedBody = body
+      mission.repliesCheckedAt = round.postedAt
       mission.error = undefined
       // The PR may have merged (or the user closed the mission) while the
       // comment was in flight; the comment exists either way, but a closed
@@ -510,7 +525,7 @@ export class Scheduler {
     const mission = this.mustFind(missionId)
     const round = latestRound(mission)
     if (!round) throw new Error(`#${mission.pr.number} has no review round yet`)
-    return buildComment({ mission: clone(mission), round: clone(round), settings: clone(this.state.settings), login: this.state.githubLogin })
+    return buildComment({ mission: clone(mission), round: clone(round), settings: clone(this.state.settings), login: this.state.githubLogin, autoPosted: false })
   }
 
   setFindingDecision(args: FindingDecisionArgs): void {
@@ -543,20 +558,24 @@ export class Scheduler {
     return round
   }
 
-  rerunMission(missionId: string, loadoutId?: string): void {
+  rerunMission(missionId: string, loadoutId?: string, options?: RunOptions): void {
     const mission = this.mustFind(missionId)
     if (!['needs_you', 'watching', 'failed'].includes(mission.state)) {
       throw new Error(`Cannot rerun from state '${mission.state}'`)
     }
     const { loadouts } = this.state.settings
     if (loadoutId !== undefined) {
-      if (!loadouts.some((l) => l.id === loadoutId)) throw new Error(`Unknown loadout: ${loadoutId}`)
+      if (!loadouts.some((l) => l.id === loadoutId)) throw new Error(`Unknown review type: ${loadoutId}`)
       mission.loadoutId = loadoutId
     }
     const loadoutName = loadouts.find((l) => l.id === mission.loadoutId)?.name ?? mission.loadoutId
+    const runOptions = sanitizeRunOptions(options)
+    if (runOptions) mission.runOptions = runOptions
+    else delete mission.runOptions
+    mission.nextTrigger = 'rerun'
     mission.stale = false
     mission.error = undefined
-    this.transition(mission, 'queued', `rerun requested (${loadoutName})`)
+    this.transition(mission, 'queued', `rerun requested (${describeRun(loadoutName, runOptions)})`)
     this.schedule()
   }
 
@@ -603,6 +622,7 @@ export class Scheduler {
     if (mission.state !== 'failed') throw new Error(`Cannot retry from state '${mission.state}'`)
     mission.stale = false
     mission.error = undefined
+    mission.nextTrigger = 'retry'
     this.transition(mission, 'queued', 'retry')
     this.schedule()
   }
@@ -611,6 +631,10 @@ export class Scheduler {
     const mission = this.mustFind(missionId)
     if (mission.state === 'closed') return
     this.controllers.get(mission.id)?.abort()
+    // Nothing is waiting on a closed review any more.
+    mission.stale = false
+    delete mission.authorReplies
+    delete mission.nextTrigger
     this.transition(mission, 'closed', note)
     this.schedule()
     const localRepoPath = this.localRepoPath(mission.pr.repo.fullName)
@@ -641,6 +665,28 @@ export class Scheduler {
   private slotName(mission: Mission): string {
     return (mission.slotId && this.slotById(mission.slotId)?.name) || 'the reviewer'
   }
+}
+
+/**
+ * The author's replies to `previous`: what the last poll saw, or, when a
+ * retry comes before the next poll, what the failed attempt was given.
+ */
+function repliesFor(mission: Mission, previous: ReviewRound): ReviewRound['replies'] {
+  if (mission.authorReplies?.length) return trimReplies(mission.authorReplies)
+  const last = latestRound(mission)
+  if (last && last !== previous && !last.postedAt && last.previousHeadSha === previous.headSha && last.replies?.length) return trimReplies(last.replies)
+  return undefined
+}
+
+/** "Blind review" or "Blind review, sonnet, effort high, $5 budget, posts without triage" for the timeline. */
+function describeRun(loadoutName: string, options: RunOptions | undefined): string {
+  if (!options) return loadoutName
+  const parts = [loadoutName]
+  if (options.model !== undefined) parts.push(options.model || 'CLI default model')
+  if (options.effort !== undefined) parts.push(options.effort ? `effort ${options.effort}` : 'CLI default effort')
+  if (options.maxBudgetUsd !== undefined) parts.push(`$${options.maxBudgetUsd} budget`)
+  if (options.autoPost !== undefined) parts.push(options.autoPost ? 'posts without triage' : 'stops for triage')
+  return parts.join(', ')
 }
 
 function countFindings(n: number): string {

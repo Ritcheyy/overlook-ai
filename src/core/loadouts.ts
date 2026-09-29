@@ -49,6 +49,9 @@ export const DEFAULT_SLOTS: Slot[] = [
   { id: 'slot-2', name: 'Nova', color: '#4fd1c5' }
 ]
 
+export const DEFAULT_REPLY_REQUEST =
+  "After pushing fixes, reply to this comment with how you handled each numbered finding: fixed, won't fix, or disagree, with a line on why. The follow-up review starts from your reply."
+
 export function defaultSettings(overrides: Partial<Settings> = {}): Settings {
   return {
     projectsRoots: ['~/Projects'],
@@ -69,7 +72,9 @@ export function defaultSettings(overrides: Partial<Settings> = {}): Settings {
     linkNodeModules: true,
     notifications: true,
     demoMode: true,
-    signature: '{loadout} · Reviewed by {character} · {approval}',
+    signature: '{type} · Reviewed by {reviewer} · {approval}',
+    replyRequest: DEFAULT_REPLY_REQUEST,
+    fileLinks: 'vscode',
     includeMine: true,
     inactiveRepos: [],
     maxPrAgeDays: 30,

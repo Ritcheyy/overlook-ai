@@ -1,93 +1,100 @@
-import { useEffect, useMemo } from 'react'
-import { ListChecks } from 'lucide-react'
-import type { Mission } from '@core/domain'
-import { latestRound } from '@core/domain'
-import { selectMissions, selectSettings, selectSlots, useAppStore } from '@/state/store'
+import { useEffect, useMemo, useState } from 'react'
+import { ListChecks, Search } from 'lucide-react'
+import { hasUpdates } from '@/lib/review'
+import { selectInbox, selectMissions, useAppStore, type TriageFilter } from '@/state/store'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
+import { Segmented } from '@/components/ui/Segmented'
 import { useNow } from '@/components/app/useNow'
-import { MissionList } from './MissionList'
-import { ReviewPane } from './ReviewPane'
-import { ClosedPane, FailedPane, ProgressPane, WatchingPane } from './panes'
-import { byUpdatedDesc, loadoutFor, slotFor } from './shared'
-
-function MissionPane({ mission }: { mission: Mission }) {
-  const slots = useAppStore(selectSlots)
-  const settings = useAppStore(selectSettings)
-  const slot = slotFor(mission, slots)
-  const loadout = loadoutFor(mission, settings)
-  const round = latestRound(mission)
-  switch (mission.state) {
-    case 'needs_you':
-    case 'posting':
-      if (round) return <ReviewPane key={`${mission.id}-${round.id}`} mission={mission} round={round} slot={slot} loadout={loadout} readOnly={mission.state === 'posting'} />
-      return <ProgressPane mission={mission} slot={slot} loadout={loadout} />
-    case 'failed':
-      return <FailedPane mission={mission} slot={slot} loadout={loadout} />
-    case 'watching':
-      return <WatchingPane mission={mission} slot={slot} loadout={loadout} />
-    case 'closed':
-      return <ClosedPane mission={mission} slot={slot} loadout={loadout} />
-    default:
-      return <ProgressPane mission={mission} slot={slot} loadout={loadout} />
-  }
-}
+import { DetailsPane } from './DetailsPane'
+import { MissionList, groupReviews } from './MissionList'
 
 export function TriageScreen() {
   const missions = useAppStore(selectMissions)
-  const slots = useAppStore(selectSlots)
-  const selectedId = useAppStore((s) => s.selectedMissionId)
+  const inbox = useAppStore(selectInbox)
+  const selectedMissionId = useAppStore((s) => s.selectedMissionId)
+  const selectedPrId = useAppStore((s) => s.selectedPrId)
+  const filter = useAppStore((s) => s.triageFilter)
+  const setFilter = useAppStore((s) => s.setTriageFilter)
   const selectMission = useAppStore((s) => s.selectMission)
   const navigate = useAppStore((s) => s.navigate)
+  const [query, setQuery] = useState('')
   const now = useNow()
 
-  const groups = useMemo(() => {
-    const needsYou = missions.filter((m) => m.state === 'needs_you').sort(byUpdatedDesc)
-    const failed = missions.filter((m) => m.state === 'failed').sort(byUpdatedDesc)
-    const recent = missions.filter((m) => m.state !== 'needs_you' && m.state !== 'failed').sort(byUpdatedDesc)
-    return { needsYou, failed, recent }
-  }, [missions])
+  const groups = useMemo(() => groupReviews(missions, filter, query), [missions, filter, query])
+  const live = useMemo(() => missions.filter((m) => m.state !== 'closed'), [missions])
+  const counts = useMemo(() => ({ needsYou: live.filter((m) => m.state === 'needs_you').length, updates: live.filter(hasUpdates).length }), [live])
 
-  const selected = selectedId ? missions.find((m) => m.id === selectedId) : undefined
+  const byId = selectedMissionId ? missions.find((m) => m.id === selectedMissionId) : undefined
+  const forPr = selectedPrId ? live.find((m) => m.prId === selectedPrId) : undefined
+  const mission = forPr ?? byId
+  const pr = mission?.pr ?? (selectedPrId ? inbox.find((p) => p.id === selectedPrId) : undefined)
 
   useEffect(() => {
-    if (selected) return
-    const first = groups.needsYou[0] ?? groups.failed[0] ?? groups.recent[0]
+    if (pr) return
+    const first = groups.needsYou[0] ?? groups.failed[0] ?? groups.inProgress[0] ?? groups.watching[0]
     if (first) selectMission(first.id)
-  }, [selected, groups, selectMission])
+  }, [pr, groups, selectMission])
 
   return (
     <div className="flex h-full min-h-0">
-      <aside className="flex w-[280px] shrink-0 flex-col border-r border-line bg-surface/40">
+      <aside className="flex w-[300px] shrink-0 flex-col border-r border-line bg-surface/40">
         <div className="flex h-[52px] shrink-0 items-center gap-2 border-b border-line px-4">
           <h1 className="text-[14px] font-semibold tracking-tight">Triage</h1>
-          <span className="text-[12px] tabular-nums text-faint">{groups.needsYou.length} waiting</span>
+          <span className="text-[12px] tabular-nums text-faint">{counts.needsYou} waiting</span>
         </div>
-        {missions.length === 0 ? (
+        <div className="flex shrink-0 flex-col gap-2 border-b border-line p-2.5">
+          <Input leading={<Search />} size="sm" placeholder="Search reviews" aria-label="Search reviews" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <Segmented<TriageFilter>
+            aria-label="Filter reviews"
+            size="sm"
+            value={filter}
+            onChange={setFilter}
+            options={[
+              { value: 'all', label: 'All', count: live.length },
+              { value: 'updates', label: 'Updates', count: counts.updates },
+              { value: 'needs_you', label: 'Needs you', count: counts.needsYou }
+            ]}
+          />
+        </div>
+        {live.length === 0 ? (
           <EmptyState
             compact
-            title="Nothing to triage"
-            description="Send a pull request to the floor from the inbox and its findings will land here."
+            title="No reviews yet"
+            description="Start a review from the Inbox and its findings land here."
             action={
               <Button size="sm" variant="secondary" onClick={() => navigate('inbox')}>
                 Open inbox
               </Button>
             }
           />
+        ) : groups.needsYou.length + groups.failed.length + groups.inProgress.length + groups.watching.length === 0 ? (
+          <EmptyState
+            compact
+            title="Nothing matches"
+            action={
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setQuery('')
+                  setFilter('all')
+                }}
+              >
+                Clear filters
+              </Button>
+            }
+          />
         ) : (
-          <MissionList {...groups} slots={slots} selectedId={selected?.id} now={now} onSelect={selectMission} />
+          <MissionList groups={groups} selectedId={mission?.id} now={now} onSelect={selectMission} />
         )}
       </aside>
       <section className="flex min-w-0 flex-1 flex-col">
-        {selected ? (
-          <MissionPane mission={selected} />
+        {pr ? (
+          <DetailsPane key={pr.id} pr={pr} mission={mission} />
         ) : (
-          <EmptyState
-            icon={<ListChecks />}
-            title="Select a mission"
-            description="Reviews that finished and need your decisions appear on the left, newest first."
-            className="h-full"
-          />
+          <EmptyState icon={<ListChecks />} title="Select a review" description="Reviews waiting for your decisions come first, then failures, running reviews and the ones being watched." className="h-full" />
         )}
       </section>
     </div>

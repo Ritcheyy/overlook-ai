@@ -9,6 +9,7 @@ import type {
   LocalRepo,
   Loadout,
   Mission,
+  PrComment,
   PullRequest,
   RawFinding,
   ReviewRound,
@@ -23,11 +24,16 @@ export interface GitHubPort {
   listReviewRequested(): Promise<PullRequest[]>
   /** Open PRs I authored. */
   listMine(): Promise<PullRequest[]>
-  /** Fresh detail for one PR (state, headSha, counts). */
-  getPullRequest(fullName: string, number: number): Promise<PullRequest>
+  /** Fresh detail for one PR (state, headSha, counts), with its conversation comments when asked. */
+  getPullRequest(fullName: string, number: number, opts?: { comments?: boolean }): Promise<PullRequestDetail>
   /** Unified diff of the PR against its base. */
   getDiff(fullName: string, number: number): Promise<string>
   postComment(fullName: string, number: number, body: string): Promise<{ url: string }>
+}
+
+export interface PullRequestDetail extends PullRequest {
+  /** Present only when requested; never stored on the inbox or a mission snapshot. */
+  comments?: PrComment[]
 }
 
 export interface PrepareWorktreeOptions {
@@ -80,6 +86,8 @@ export interface ReviewRequest {
   diff: string
   /** Previous round, so follow-up reviews can say what was fixed. */
   previousRound?: ReviewRound
+  /** The author's replies to the previous round, oldest first. */
+  replies?: PrComment[]
   /** Sibling repos, the reviewer's open PRs in them, and the container's notes; absent for single-repo reviews. */
   workspace?: WorkspaceContext
   settings: Settings

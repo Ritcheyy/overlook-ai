@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Mission, PullRequest } from '../domain'
 import { seedPullRequests } from '../demo/seed'
 import { defaultSettings } from '../loadouts'
-import { applyInboxFilters, inboxWanted, mergeListings, updatedSince } from './poller'
+import { applyInboxFilters, authorRepliesSince, autoFollowUpAllowed, inboxWanted, mergeListings, updatedSince } from './poller'
 
 const NOW = new Date('2026-09-13T12:00:00Z')
 const DAY = 86_400_000
@@ -57,3 +57,67 @@ describe('applyInboxFilters', () => {
     expect([...listed.keys()]).toEqual([inactiveHeld.id, fresh.id])
   })
 })
+
+describe('authorRepliesSince', () => {
+  const posted = { url: 'https://github.com/acme/checkout-api/pull/412#issuecomment-100', createdAt: '2026-09-13T12:00:05Z' }
+  const watched = (author: string): Mission => ({
+    ...mission({ ...pr('acme/checkout-api', 412, 0), author }, 'watching'),
+    rounds: [
+      {
+        id: 'r1',
+        index: 1,
+        headSha: 'a'.repeat(40),
+        startedAt: '2026-09-13T11:00:00Z',
+        findings: [],
+        summary: '',
+        verdict: 'comment',
+        postedAt: '2026-09-13T12:00:07Z',
+        postedCommentUrl: 'https://github.com/acme/checkout-api/pull/412#issuecomment-100'
+      }
+    ]
+  })
+  const comment = (id: number, author: string, createdAt: string) => ({ url: `https://github.com/acme/checkout-api/pull/412#issuecomment-${id}`, author, body: `c${id}`, createdAt })
+
+  it("counts only the author's comments after the posted review", () => {
+    const replies = authorRepliesSince(watched('dami-codes'), [
+      comment(90, 'dami-codes', '2026-09-13T11:59:00Z'),
+      { ...comment(100, 'ritchey', posted.createdAt), url: posted.url },
+      comment(101, 'vercel', '2026-09-13T12:01:00Z'),
+      comment(102, 'Dami-Codes', '2026-09-13T12:02:00Z')
+    ])
+    expect(replies.map((r) => r.body)).toEqual(['c102'])
+  })
+
+  it("tells the app's own comment from the author's on a self-review by comment id", () => {
+    const replies = authorRepliesSince(watched('ritchey'), [
+      { ...comment(100, 'ritchey', posted.createdAt), url: posted.url },
+      comment(101, 'ritchey', '2026-09-13T12:06:00Z')
+    ])
+    expect(replies.map((r) => r.body)).toEqual(['c101'])
+  })
+
+  it('uses GitHub time for the posted comment, so a reply seconds after it still counts under clock drift', () => {
+    const replies = authorRepliesSince(watched('dami-codes'), [{ ...comment(100, 'ritchey', posted.createdAt), url: posted.url }, comment(101, 'dami-codes', '2026-09-13T12:00:06Z')])
+    expect(replies).toHaveLength(1)
+  })
+
+  it('finds nothing before anything was posted', () => {
+    expect(authorRepliesSince({ ...watched('dami-codes'), rounds: [] }, [comment(101, 'dami-codes', '2026-09-13T12:06:00Z')])).toEqual([])
+  })
+})
+
+describe('autoFollowUpAllowed', () => {
+  it('counts the automatic rounds the previous version started from their queue note', () => {
+    const m = {
+      ...mission(pr('acme/checkout-api', 412, 0), 'watching'),
+      timeline: [
+        { at: '2026-09-13T10:00:00Z', to: 'queued' as const },
+        { at: '2026-09-13T11:00:00Z', from: 'watching' as const, to: 'queued' as const, note: 'new push 1234567' },
+        { at: '2026-09-13T11:30:00Z', from: 'watching' as const, to: 'queued' as const, note: 'rerun requested (Blind review)' }
+      ]
+    }
+    expect(autoFollowUpAllowed(m, defaultSettings({ maxAutoRoundsPerMission: 1 }))).toBe(false)
+    expect(autoFollowUpAllowed(m, defaultSettings({ maxAutoRoundsPerMission: 2 }))).toBe(true)
+  })
+})
+

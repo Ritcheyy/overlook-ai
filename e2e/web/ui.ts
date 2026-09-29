@@ -56,7 +56,7 @@ export function inboxRow(page: Page, number: number): Locator {
   return page.getByRole('listitem').filter({ has: numberSpan(page, number) })
 }
 
-/** Sends a PR to the floor with the default loadout and waits for its row to show a mission state. */
+/** Starts a review of a PR with the default review type and waits for its row to show the review state. */
 export async function dispatch(page: Page, number: number): Promise<void> {
   await goTo(page, 'Inbox')
   const row = inboxRow(page, number)
@@ -70,7 +70,7 @@ export async function setAutoRounds(page: Page, cap: number): Promise<void> {
   const field = page.getByLabel('Automatic follow-up rounds')
   await field.fill(String(cap))
   await field.press('Enter')
-  await expect(page.getByText('Saved', { exact: true })).toHaveClass(/opacity-100/)
+  await expect(page.getByText('Saved', { exact: true }).first()).toHaveClass(/opacity-100/)
   await expect(field).toHaveValue(String(cap))
 }
 
@@ -82,13 +82,15 @@ export function hudChip(page: Page, slotId: SlotId): Locator {
   return hudCard(page, slotId).getByText(HUD_STATE)
 }
 
-export function counter(page: Page, label: 'queued' | 'needs you' | 'watching' | 'new push'): Locator {
-  return page.getByText(new RegExp(`^\\d+ ${label}$`))
+export function counter(page: Page, label: 'queued' | 'needs you' | 'watching' | 'updates'): Locator {
+  // "1 update" and "2 updates" both count as the updates counter.
+  const pattern = label === 'updates' ? 'updates?' : label
+  return page.getByText(new RegExp(`^\\d+ ${pattern}$`))
 }
 
-/** The amber "new push" tag on a corkboard card, under a waving character, or on a HUD card. */
+/** The amber "new push" tag under a waving character or on a HUD card; corkboard cards name their PR, as "#412 new push". */
 export function newPushTag(page: Page): Locator {
-  return page.getByText('new push', { exact: true })
+  return page.getByText(/^(#\d+ )?new push$/)
 }
 
 /** Runs one of the floor's demo actions, e.g. 'Push to #412' or 'Fail next review'. */
@@ -107,7 +109,12 @@ export async function closeDemoControls(page: Page): Promise<void> {
 }
 
 export function missionList(page: Page): Locator {
-  return page.getByRole('navigation', { name: 'Missions' })
+  return page.getByRole('navigation', { name: 'Reviews' })
+}
+
+/** The one-line status under the details header, with the action that moves the review on. */
+export function statusLine(page: Page): Locator {
+  return page.locator('[data-status]')
 }
 
 export function missionItem(page: Page, number: number): Locator {
@@ -126,7 +133,7 @@ export function findings(page: Page): Locator {
 }
 
 export function findingCard(page: Page, title: string): Locator {
-  return findings(page).filter({ has: page.getByRole('heading', { name: title }) })
+  return findings(page).filter({ hasText: title })
 }
 
 export async function decide(page: Page, title: string, choice: 'Approve' | 'Drop'): Promise<void> {
@@ -141,7 +148,7 @@ export async function postComment(page: Page): Promise<void> {
 }
 
 export function watchingBanner(page: Page): Locator {
-  return page.getByRole('status').filter({ hasText: 'Watching for pushes' })
+  return statusLine(page).filter({ hasText: 'Watching for' })
 }
 
 export function logRow(page: Page, number: number): Locator {

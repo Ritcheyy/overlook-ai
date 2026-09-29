@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useFrame, type ThreeEvent } from '@react-three/fiber'
-import { Edges, Html, useCursor } from '@react-three/drei'
+import { Edges, useCursor } from '@react-three/drei'
 import * as THREE from 'three'
 import type { Slot } from '@core/domain'
 import { useAppStore } from '@/state/store'
@@ -27,6 +27,7 @@ import {
 } from './animation'
 import { BUBBLE_HEIGHT, DESK_HEIGHT, DESK_ROTATION, DESK_SIZE, MONITOR_OFFSET, MONITOR_YAW_WORLD, SCREEN_SIZE, SEAT_OFFSET, deskPosition } from './layout'
 import { Character } from './Character'
+import { FloorLabel } from './FloorLabel'
 import { hasUnreviewedPush } from './floor-selectors'
 import { NewPushChip } from './Hud'
 import { ScreenPainter } from './screen-painter'
@@ -41,8 +42,7 @@ interface Props {
 
 export function Station({ slot, index }: Props) {
   const { mission, visual, findingCount } = useSlotView(slot)
-  const navigate = useAppStore((s) => s.navigate)
-  const selectMission = useAppStore((s) => s.selectMission)
+  const openDetails = useAppStore((s) => s.openDetails)
   const [hovered, setHovered] = useState(false)
   useCursor(hovered && !!mission)
 
@@ -189,9 +189,7 @@ export function Station({ slot, index }: Props) {
   })
 
   const open = () => {
-    if (!mission) return
-    if (mission.state === 'needs_you' || mission.state === 'failed') navigate('triage', { missionId: mission.id })
-    else selectMission(mission.id)
+    if (mission) openDetails({ missionId: mission.id })
   }
   const onClick = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation()
@@ -341,26 +339,21 @@ export function Station({ slot, index }: Props) {
       </group>
 
       {bubble !== 'none' && (
-        <Html
-          position={[SEAT_OFFSET[0], BUBBLE_HEIGHT, SEAT_OFFSET[2]]}
-          center
-          zIndexRange={HTML_Z}
-          pointerEvents={bubble === 'alert' || bubble === 'error' ? 'auto' : 'none'}
-        >
+        <FloorLabel position={[SEAT_OFFSET[0], BUBBLE_HEIGHT, SEAT_OFFSET[2]]} center zIndexRange={HTML_Z}>
           <BubbleView kind={bubble} onClick={bubble === 'alert' || bubble === 'error' ? open : undefined} />
-        </Html>
+        </FloorLabel>
       )}
       {visual === 'needs_you' && (
-        <Html position={[MONITOR_OFFSET[0] + 0.55, DESK_HEIGHT + 0.95, MONITOR_OFFSET[2]]} center zIndexRange={HTML_Z} pointerEvents="none">
+        <FloorLabel position={[MONITOR_OFFSET[0] + 0.55, DESK_HEIGHT + 0.95, MONITOR_OFFSET[2]]} center zIndexRange={HTML_Z}>
           <div className="pointer-events-none whitespace-nowrap rounded-md border border-amber/40 bg-bg/85 px-2 py-0.5 font-mono text-[11px] text-amber">
             {findingCount} finding{findingCount === 1 ? '' : 's'}
           </div>
-        </Html>
+        </FloorLabel>
       )}
       {visual === 'needs_you' && mission && hasUnreviewedPush(mission) && (
-        <Html position={[SEAT_OFFSET[0], BUBBLE_HEIGHT - 0.5, SEAT_OFFSET[2]]} center zIndexRange={HTML_Z} pointerEvents="none">
+        <FloorLabel position={[SEAT_OFFSET[0], BUBBLE_HEIGHT - 0.5, SEAT_OFFSET[2]]} center zIndexRange={HTML_Z}>
           <NewPushChip className="pointer-events-none bg-bg/90 shadow-[0_0_10px_rgba(245,181,68,0.55)]" />
-        </Html>
+        </FloorLabel>
       )}
     </group>
   )
@@ -381,7 +374,7 @@ function BubbleView({ kind, onClick }: { kind: Bubble; onClick?: () => void }) {
           onClick={onClick}
           className="pointer-events-auto relative flex h-8 w-8 items-center justify-center"
           title="Findings are waiting for you"
-          aria-label="Open triage: findings are waiting for you"
+          aria-label="Open the details: findings are waiting for you"
         >
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber opacity-50" />
           <span className="relative flex h-6 w-6 items-center justify-center rounded-full bg-amber text-sm font-bold leading-none text-bg shadow-[0_0_12px_rgba(245,181,68,0.7)]">
@@ -394,11 +387,13 @@ function BubbleView({ kind, onClick }: { kind: Bubble; onClick?: () => void }) {
         <button
           type="button"
           onClick={onClick}
-          className="pointer-events-auto flex h-6 w-6 items-center justify-center rounded-full border border-rose/60 bg-rose/20 text-sm font-bold leading-none text-rose"
+          className="pointer-events-auto relative flex h-8 w-8 items-center justify-center"
           title="This review failed"
-          aria-label="Open triage: this review failed"
+          aria-label="Open the details: this review failed"
         >
-          ×
+          <span className="relative flex h-6 w-6 items-center justify-center rounded-full bg-rose text-sm font-bold leading-none text-bg shadow-[0_0_12px_rgba(244,114,142,0.6)]">
+            ×
+          </span>
         </button>
       )
     case 'sleep':

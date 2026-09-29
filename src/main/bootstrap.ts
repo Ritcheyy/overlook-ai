@@ -107,6 +107,7 @@ export async function bootstrap(): Promise<Engine> {
     demoControls: demo
       ? {
           simulatePush: (prId) => void github.simulatePush(prId),
+      simulateReply: (prId) => void github.simulateReply(prId),
           simulateClose: (prId, merged) => void github.simulateClose(prId, merged),
           simulateNewPullRequest: () => void github.simulateNewPullRequest(),
           failNextReview: () => {

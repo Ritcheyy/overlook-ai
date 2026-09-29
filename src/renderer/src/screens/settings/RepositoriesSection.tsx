@@ -170,7 +170,10 @@ export function RepositoriesSection({ settings, save }: { settings: Settings; sa
     }
   }
 
-  const known = [...new Set([...repos.map((r) => r.fullName), ...Object.keys(settings.repoPaths), ...settings.autoPostRepos])].sort()
+  // Switched-off repos never reach the inbox, so offering to auto-post them only adds noise; their choice is kept.
+  const known = [...new Set([...repos.map((r) => r.fullName), ...Object.keys(settings.repoPaths), ...settings.autoPostRepos])]
+    .filter((name) => !settings.inactiveRepos.includes(name))
+    .sort()
   const toggleAutoPost = (fullName: string, on: boolean) => {
     const next = on ? [...new Set([...settings.autoPostRepos, fullName])] : settings.autoPostRepos.filter((r) => r !== fullName)
     void save({ autoPostRepos: next })
@@ -271,7 +274,7 @@ export function RepositoriesSection({ settings, save }: { settings: Settings; sa
       <Field label="Link node_modules" hint="Symlink node_modules from the main checkout into new worktrees so reviews do not wait on installs." htmlFor="link-node-modules">
         <Toggle aria-label="Link node_modules" checked={settings.linkNodeModules} onChange={(linkNodeModules) => void save({ linkNodeModules })} />
       </Field>
-      <Field label="Auto-post repos" hint="Approved findings for these repos post straight to the PR with no triage stop." stacked>
+      <Field label="Auto-post repos" hint="Findings for these active repos post straight to the PR with no triage stop." stacked>
         {known.length === 0 ? (
           <div className="text-[12px] text-faint">Scan your project roots first, or add a path override above.</div>
         ) : (

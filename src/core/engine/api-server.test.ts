@@ -124,6 +124,12 @@ const missionOf = (s: AppSnapshot, id: string): Mission => {
 const waitForState = (h: Harness, id: string, state: Mission['state']) =>
   waitFor(h, (s) => s.missions.find((m) => m.id === id)?.state === state).then((s) => missionOf(s, id))
 
+/** The PR author answers the posted review a second later, which is what lets a push start a follow-up. */
+function authorReplies(h: Harness, prId: string, body?: string) {
+  h.clock.advance(1000)
+  return h.github.simulateReply(prId, body)
+}
+
 afterEach(async () => {
   for (const h of live.splice(0)) await h.engine.stop()
 })
@@ -231,10 +237,10 @@ describe('engine', () => {
     const h = await makeEngine()
     await expect(h.api.dispatch({ prId: 'acme/checkout-api#9999' })).rejects.toThrow('PR not found: acme/checkout-api#9999')
     await expect(h.api.dispatch({ prId: 'garbage' })).rejects.toThrow('PR not found: garbage')
-    await expect(h.api.dispatch({ prId: PR_412, loadoutId: 'nope' })).rejects.toThrow('Unknown loadout: nope')
+    await expect(h.api.dispatch({ prId: PR_412, loadoutId: 'nope' })).rejects.toThrow('Unknown review type: nope')
     const m = await h.api.dispatch({ prId: PR_412, loadoutId: 'security' })
     expect(m.loadoutId).toBe('security')
-    await expect(h.api.dispatch({ prId: PR_412 })).rejects.toThrow('#412 already has an active mission')
+    await expect(h.api.dispatch({ prId: PR_412 })).rejects.toThrow('#412 already has an active review')
     await waitForState(h, m.id, 'needs_you')
     expect(h.runner.calls[0].loadout.id).toBe('security')
   })
@@ -271,13 +277,14 @@ describe('engine', () => {
 
     h.clock.advance(1000)
     const pushed = h.github.simulatePush(PR_1203)
+    const reply = authorReplies(h, PR_1203)
     await h.api.refreshInbox()
     let snap = await h.api.getSnapshot()
     const bQueued = missionOf(snap, b.id)
     expect(bQueued.state).toBe('queued')
     expect(bQueued.stale).toBe(false)
     expect(bQueued.pr.headSha).toBe(pushed.headSha)
-    expect(bQueued.timeline[bQueued.timeline.length - 1].note).toBe(`new push ${pushed.headSha.slice(0, 7)}`)
+    expect(bQueued.timeline[bQueued.timeline.length - 1].note).toBe(`mariam-dev replied; follow-up on ${pushed.headSha.slice(0, 7)}`)
 
     // Free slot-2 (c) and slot-1 (a): b must go first and land on slot-2 even though slot-1 frees first.
     const aSnap = missionOf(snap, a.id)
@@ -298,6 +305,10 @@ describe('engine', () => {
     const followUp = h.runner.calls.find((r) => r.mission.id === b.id && r.round.index === 2)
     expect(followUp?.previousRound?.headSha).toBe(firstSha)
     expect(followUp?.previousRound?.postedAt).toBeDefined()
+    expect(followUp?.replies).toEqual([reply])
+    expect(bAgain.rounds[1].trigger).toBe('reply')
+    expect(bAgain.rounds[1].replies).toEqual([reply])
+    expect(bAgain.authorReplies).toBeUndefined()
     // The runner got clones: scribbling on them must not reach the engine.
     followUp!.mission.error = 'scribbled'
     followUp!.round.summary = 'scribbled'
@@ -326,6 +337,7 @@ describe('engine', () => {
     await waitForState(h, a.id, 'watching')
 
     h.github.simulatePush(PR_1203)
+    authorReplies(h, PR_1203)
     await h.api.refreshInbox()
     const again = await waitForState(h, b.id, 'needs_you')
     expect(again.slotId).toBe('slot-2')
@@ -951,13 +963,24 @@ describe('engine', () => {
     await h.api.postComment(a.id)
     await waitForState(h, a.id, 'watching')
 
+    // Without a reply the moved head only marks the review stale.
+    await h.api.refreshInbox()
+    await sleep(20)
+    const waiting = missionOf(await h.api.getSnapshot(), a.id)
+    expect(waiting.state).toBe('watching')
+    expect(waiting.stale).toBe(true)
+    expect(waiting.timeline[waiting.timeline.length - 1].note).toBe(`new push ${pushed.headSha.slice(0, 7)}; waiting for a reply`)
+
+    authorReplies(h, PR_412)
     await h.api.refreshInbox()
     const followUp = await waitForState(h, a.id, 'needs_you')
     expect(followUp.stale).toBe(false)
     expect(followUp.rounds).toHaveLength(2)
     expect(followUp.rounds[1].headSha).toBe(pushed.headSha)
     expect(followUp.rounds[1].previousHeadSha).toBe(done.rounds[0].headSha)
-    expect(followUp.timeline.some((e) => e.from === 'watching' && e.to === 'queued' && e.note === `new push ${pushed.headSha.slice(0, 7)}`)).toBe(true)
+    expect(
+      followUp.timeline.some((e) => e.from === 'watching' && e.to === 'queued' && e.note === `dami-codes replied; follow-up on ${pushed.headSha.slice(0, 7)}`)
+    ).toBe(true)
 
     // Nothing new: the next poll leaves the posted follow-up alone.
     await h.api.setFindingDecisions({ missionId: a.id, roundId: followUp.rounds[1].id, decision: 'approved' })
@@ -1036,7 +1059,7 @@ describe('engine', () => {
     const b = await h.api.dispatch({ prId: PR_1203 })
     await waitForState(h, a.id, 'needs_you')
     await waitForState(h, b.id, 'needs_you')
-    await expect(h.api.updateSettings({ slots: [{ id: 'slot-1', name: 'Vhagar', color: '#f5b544' }] })).rejects.toThrow("Slot 'Nova' is busy")
+    await expect(h.api.updateSettings({ slots: [{ id: 'slot-1', name: 'Vhagar', color: '#f5b544' }] })).rejects.toThrow('Nova is busy')
     const snap = await h.api.getSnapshot()
     expect(snap.settings.slots).toHaveLength(2)
     expect(snap.slots.map((s) => s.missionId)).toEqual([a.id, b.id])
@@ -1167,6 +1190,7 @@ describe('engine', () => {
     await h.api.postComment(a.id)
     await waitForState(h, a.id, 'watching')
     h.github.simulatePush(PR_412)
+    authorReplies(h, PR_412)
     await h.api.refreshInbox()
     const followUp = await waitForState(h, a.id, 'needs_you')
     expect(followUp.rounds).toHaveLength(2)
@@ -1200,6 +1224,7 @@ describe('engine', () => {
     await waitForState(h, a.id, 'needs_you')
     await postLatest()
     h.github.simulatePush(PR_412)
+    authorReplies(h, PR_412)
     await h.api.refreshInbox()
     const second = await waitForState(h, a.id, 'needs_you')
     expect(second.rounds).toHaveLength(2)
@@ -1220,7 +1245,7 @@ describe('engine', () => {
     })
     expect(h.notifier.notifications[h.notifier.notifications.length - 1]).toEqual({
       title: 'New push on #412',
-      body: 'Auto follow-up limit (1) reached. Re-run when ready.',
+      body: 'The automatic follow-up limit (1) is reached. Re-run when ready.',
       missionId: a.id
     })
     expect(h.runner.calls).toHaveLength(2)
@@ -1234,11 +1259,20 @@ describe('engine', () => {
     expect(still.timeline).toHaveLength(paused.timeline.length)
     expect(h.notifier.notifications).toHaveLength(count)
 
+    // A reply cannot get past the cap either.
+    authorReplies(h, PR_412)
+    await h.api.refreshInbox()
+    await sleep(20)
+    expect(missionOf(await h.api.getSnapshot(), a.id).state).toBe('watching')
+    expect(h.notifier.notifications[h.notifier.notifications.length - 1]).toMatchObject({ title: 'dami-codes replied on #412' })
+
     await h.api.rerunMission(a.id)
     const third = await waitForState(h, a.id, 'needs_you')
     expect(third.rounds).toHaveLength(3)
     expect(third.stale).toBe(false)
     expect(third.rounds[2].headSha).toBe(pushed.headSha)
+    expect(third.rounds[2].trigger).toBe('rerun')
+    expect(third.rounds[2].replies).toHaveLength(1)
     expect(third.autoFollowUp).toBeUndefined()
   })
 
@@ -1262,12 +1296,13 @@ describe('engine', () => {
     expect(paused.rounds).toHaveLength(1)
     expect(h.notifier.notifications[h.notifier.notifications.length - 1]).toEqual({
       title: 'New push on #412',
-      body: 'Auto follow-up is off. Re-run when ready.',
+      body: 'Automatic follow-ups are off for this review. Re-run when ready.',
       missionId: a.id
     })
 
     await h.api.setAutoFollowUp({ missionId: a.id, enabled: true })
     const again = h.github.simulatePush(PR_412)
+    authorReplies(h, PR_412)
     await h.api.refreshInbox()
     const followUp = await waitForState(h, a.id, 'needs_you')
     expect(followUp.autoFollowUp).toBe(true)
@@ -1277,7 +1312,7 @@ describe('engine', () => {
 
     await h.api.closeMission(a.id)
     await expect(h.api.setAutoFollowUp({ missionId: a.id, enabled: false })).rejects.toThrow("Cannot change auto follow-up from state 'closed'")
-    await expect(h.api.setAutoFollowUp({ missionId: 'nope', enabled: false })).rejects.toThrow('Mission not found: nope')
+    await expect(h.api.setAutoFollowUp({ missionId: 'nope', enabled: false })).rejects.toThrow('Review not found: nope')
   })
 
   it('recovers a mission that was posting into needs_you with its triage intact', async () => {
@@ -1385,7 +1420,7 @@ describe('engine', () => {
     const h = await makeEngine()
     const a = await h.api.dispatch({ prId: PR_412 })
     const done = await waitForState(h, a.id, 'needs_you')
-    await expect(h.api.rerunMission(a.id, 'nope')).rejects.toThrow('Unknown loadout: nope')
+    await expect(h.api.rerunMission(a.id, 'nope')).rejects.toThrow('Unknown review type: nope')
     expect(missionOf(await h.api.getSnapshot(), a.id)).toMatchObject({ state: 'needs_you', loadoutId: 'blind' })
 
     await h.api.rerunMission(a.id, 'security')
@@ -1510,6 +1545,7 @@ describe('engine', () => {
     const stale = await h.github.listReviewRequested()
     h.github.listReviewRequested = async () => structuredClone(stale)
     const pushed = h.github.simulatePush(PR_412)
+    authorReplies(h, PR_412)
     h.github.simulateClose(PR_1203, true)
     const snap = await h.api.refreshInbox()
     const listedPr = snap.inbox.find((p) => p.id === PR_412)
@@ -1705,4 +1741,193 @@ describe('engine', () => {
     const notAList = await makeEngine({ repos: new MockRepos([], []), settings: { workspaces: 'corrupt' as unknown as Workspace[] } })
     expect((await notAList.api.getSnapshot()).settings.workspaces).toEqual([])
   })
+
+  it('holds a push until the author replies, and flags a reply that comes without one', async () => {
+    const h = await makeEngine()
+    const a = await h.api.dispatch({ prId: PR_412 })
+    const done = await waitForState(h, a.id, 'needs_you')
+    await h.api.setFindingDecisions({ missionId: a.id, roundId: done.rounds[0].id, decision: 'approved' })
+    await h.api.postComment(a.id)
+    await waitForState(h, a.id, 'watching')
+
+    // A reply with no new commits only raises the flag.
+    const early = authorReplies(h, PR_412, 'Will fix tomorrow.')
+    await h.api.refreshInbox()
+    await sleep(20)
+    let m = missionOf(await h.api.getSnapshot(), a.id)
+    expect(m.state).toBe('watching')
+    expect(m.stale).toBe(false)
+    expect(m.authorReplies).toEqual([early])
+    expect(m.timeline[m.timeline.length - 1].note).toBe('dami-codes replied')
+    expect(h.notifier.notifications[h.notifier.notifications.length - 1]).toEqual({
+      title: 'dami-codes replied on #412',
+      body: 'No new commits yet, so no follow-up has started.',
+      missionId: a.id
+    })
+    const count = h.notifier.notifications.length
+    await h.api.refreshInbox()
+    await sleep(20)
+    expect(h.notifier.notifications).toHaveLength(count)
+
+    // The push after it starts the follow-up, and the reviewer gets both replies.
+    h.github.simulatePush(PR_412)
+    const late = authorReplies(h, PR_412, 'Pushed the fixes.')
+    await h.api.refreshInbox()
+    const followUp = await waitForState(h, a.id, 'needs_you')
+    expect(followUp.rounds[1].trigger).toBe('reply')
+    expect(followUp.rounds[1].replies?.map((r) => r.body)).toEqual([early.body, late.body])
+    expect(h.runner.calls.find((c) => c.round.id === followUp.rounds[1].id)?.replies).toHaveLength(2)
+    expect(followUp.authorReplies).toBeUndefined()
+  })
+
+  it("ignores other people's comments and tells a self-review reply from the app's own comment", async () => {
+    const h = await makeEngine()
+    const mine = 'acme/checkout-api#419'
+    const a = await h.api.dispatch({ prId: mine })
+    const done = await waitForState(h, a.id, 'needs_you')
+    await h.api.setFindingDecisions({ missionId: a.id, roundId: done.rounds[0].id, decision: 'approved' })
+    await h.api.postComment(a.id)
+    await waitForState(h, a.id, 'watching')
+
+    h.github.simulatePush(mine)
+    h.clock.advance(1000)
+    h.github.simulateReply(mine, 'Preview deployed.', 'vercel')
+    await h.api.refreshInbox()
+    await sleep(20)
+    let m = missionOf(await h.api.getSnapshot(), a.id)
+    expect(m.state).toBe('watching')
+    expect(m.stale).toBe(true)
+    expect(m.authorReplies).toBeUndefined()
+
+    // Same account as the app, but not a comment the app posted.
+    authorReplies(h, mine, 'Done, see the table.')
+    await h.api.refreshInbox()
+    m = await waitForState(h, a.id, 'needs_you')
+    expect(m.rounds[1].replies?.map((r) => r.author)).toEqual(['ritchey'])
+  })
+
+  it('runs one review with the chosen model, effort and budget, then goes back to the settings', async () => {
+    const h = await makeEngine({ settings: { claudeModel: 'opus', claudeEffort: 'max', maxBudgetUsdPerReview: 15 } })
+    const a = await h.api.dispatch({ prId: PR_412, options: { model: 'sonnet', effort: 'low', maxBudgetUsd: 2 } })
+    const done = await waitForState(h, a.id, 'needs_you')
+    const first = h.runner.calls[0]
+    expect(first.settings).toMatchObject({ claudeModel: 'sonnet', claudeEffort: 'low', maxBudgetUsdPerReview: 2 })
+    expect(done.rounds[0]).toMatchObject({ effort: 'low', budgetUsd: 2, trigger: 'dispatch' })
+    expect(done.runOptions).toBeUndefined()
+    expect((await h.api.getSnapshot()).settings.claudeModel).toBe('opus')
+
+    await h.api.setFindingDecisions({ missionId: a.id, roundId: done.rounds[0].id, decision: 'approved' })
+    await h.api.postComment(a.id)
+    await waitForState(h, a.id, 'watching')
+    h.github.simulatePush(PR_412)
+    authorReplies(h, PR_412)
+    await h.api.refreshInbox()
+    const followUp = await waitForState(h, a.id, 'needs_you')
+    const second = h.runner.calls.find((c) => c.round.id === followUp.rounds[1].id)!
+    expect(second.settings).toMatchObject({ claudeModel: 'opus', claudeEffort: 'max', maxBudgetUsdPerReview: 15 })
+  })
+
+  it('keeps re-run options for a retry and can post that one run without triage', async () => {
+    const h = await makeEngine()
+    const a = await h.api.dispatch({ prId: PR_412 })
+    const done = await waitForState(h, a.id, 'needs_you')
+    await h.api.setFindingDecisions({ missionId: a.id, roundId: done.rounds[0].id, decision: 'approved' })
+    await h.api.postComment(a.id)
+    await waitForState(h, a.id, 'watching')
+
+    h.runner.inner.failNext = true
+    await h.api.rerunMission(a.id, 'security', { model: '', maxBudgetUsd: 1, autoPost: true })
+    const failed = await waitForState(h, a.id, 'failed')
+    expect(failed.runOptions).toEqual({ model: '', maxBudgetUsd: 1, autoPost: true })
+    expect(failed.timeline.some((e) => e.note === 'rerun requested (Security pass, CLI default model, $1 budget, posts without triage)')).toBe(true)
+
+    await h.api.retryMission(a.id)
+    const posted = await waitForState(h, a.id, 'watching')
+    const retry = h.runner.calls[h.runner.calls.length - 1]
+    expect(retry.settings).toMatchObject({ claudeModel: '', maxBudgetUsdPerReview: 1 })
+    expect(latestRound(posted)).toMatchObject({ model: 'demo-reviewer', budgetUsd: 1, trigger: 'retry' })
+    expect(latestRound(posted)?.postedBody).toContain('Posted automatically')
+    expect(posted.runOptions).toBeUndefined()
+    expect(posted.autoPost).toBe(false)
+  })
+
+  it('clears the new-push flag and any replies when the review closes', async () => {
+    const h = await makeEngine({ settings: { maxAutoRoundsPerMission: 0 } })
+    const a = await h.api.dispatch({ prId: PR_412 })
+    const done = await waitForState(h, a.id, 'needs_you')
+    await h.api.setFindingDecisions({ missionId: a.id, roundId: done.rounds[0].id, decision: 'approved' })
+    await h.api.postComment(a.id)
+    await waitForState(h, a.id, 'watching')
+    h.github.simulatePush(PR_412)
+    authorReplies(h, PR_412)
+    await h.api.refreshInbox()
+    await sleep(20)
+    const flagged = missionOf(await h.api.getSnapshot(), a.id)
+    expect(flagged.stale).toBe(true)
+    expect(flagged.authorReplies).toHaveLength(1)
+    await h.api.closeMission(a.id)
+    const closed = missionOf(await h.api.getSnapshot(), a.id)
+    expect(closed.state).toBe('closed')
+    expect(closed.stale).toBe(false)
+    expect(closed.authorReplies).toBeUndefined()
+  })
+
+  it('reads the replies of a review watched before replies were tracked without notifying, then notifies new ones', async () => {
+    const h = await makeEngine()
+    const a = await h.api.dispatch({ prId: PR_412 })
+    const done = await waitForState(h, a.id, 'needs_you')
+    await h.api.setFindingDecisions({ missionId: a.id, roundId: done.rounds[0].id, decision: 'approved' })
+    await h.api.postComment(a.id)
+    await waitForState(h, a.id, 'watching')
+    expect(missionOf(await h.api.getSnapshot(), a.id).repliesCheckedAt).toBeDefined()
+    await h.engine.stop()
+    live.splice(live.indexOf(h), 1)
+
+    // As an older version would have saved it.
+    delete h.store.state!.missions[0].repliesCheckedAt
+    const old = authorReplies(h, PR_412, 'Answered before the upgrade.')
+    const again = await makeEngine({ store: h.store, github: h.github, poll: false })
+    await again.api.refreshInbox()
+    let m = missionOf(await again.api.getSnapshot(), a.id)
+    expect(m.authorReplies).toEqual([old])
+    expect(again.notifier.notifications.some((n) => n.title.includes('replied'))).toBe(false)
+
+    h.clock.advance(1000)
+    again.clock.advance(5000)
+    h.github.simulateReply(PR_412, 'And one after it.')
+    await again.api.refreshInbox()
+    m = missionOf(await again.api.getSnapshot(), a.id)
+    expect(m.authorReplies).toHaveLength(2)
+    expect(again.notifier.notifications.filter((n) => n.title === 'dami-codes replied on #412')).toHaveLength(1)
+  })
+
+  it('posts one first run without triage when asked, then stops for triage on follow-ups', async () => {
+    const h = await makeEngine()
+    const a = await h.api.dispatch({ prId: PR_412, options: { autoPost: true } })
+    const posted = await waitForState(h, a.id, 'watching')
+    expect(posted.autoPost).toBe(false)
+    expect(h.github.comments).toHaveLength(1)
+    h.github.simulatePush(PR_412)
+    authorReplies(h, PR_412)
+    await h.api.refreshInbox()
+    const followUp = await waitForState(h, a.id, 'needs_you')
+    expect(followUp.rounds[1].findings.every((f) => f.decision === 'pending')).toBe(true)
+    expect(h.github.comments).toHaveLength(1)
+  })
+
+  it('announces a push that landed during triage once, not again after posting', async () => {
+    const h = await makeEngine()
+    const a = await h.api.dispatch({ prId: PR_412 })
+    const done = await waitForState(h, a.id, 'needs_you')
+    h.github.simulatePush(PR_412)
+    await h.api.refreshInbox()
+    await h.api.setFindingDecisions({ missionId: a.id, roundId: done.rounds[0].id, decision: 'approved' })
+    await h.api.postComment(a.id)
+    await waitForState(h, a.id, 'watching')
+    await h.api.refreshInbox()
+    await sleep(20)
+    expect(h.notifier.notifications.filter((n) => n.title.startsWith('New push on #412'))).toHaveLength(1)
+    expect(missionOf(await h.api.getSnapshot(), a.id).stale).toBe(true)
+  })
 })
+

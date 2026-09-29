@@ -11,6 +11,8 @@ export interface BuildCommentArgs {
   settings: Settings
   /** GitHub login of the person triaging; absent until the first poll. */
   login?: string
+  /** The comment goes out without a triage stop; defaults to the mission's own setting. */
+  autoPosted?: boolean
 }
 
 const SEVERITY_LABELS: Record<FindingSeverity, string> = {
@@ -38,13 +40,18 @@ function compareFindings(a: Finding, b: Finding): number {
   return (a.line ?? Number.MAX_SAFE_INTEGER) - (b.line ?? Number.MAX_SAFE_INTEGER)
 }
 
+/** Approved findings in the order the comment numbers them, which is also how the author's reply refers to them. */
+export function postedFindings(round: ReviewRound): Finding[] {
+  return round.findings.filter((f) => f.decision === 'approved').sort(compareFindings)
+}
+
 function blobUrl(mission: Mission, headSha: string, file: string, line?: number): string {
   const { owner, name } = mission.pr.repo
   const path = file.split('/').map(encodeURIComponent).join('/')
   return `https://github.com/${owner}/${name}/blob/${headSha}/${path}${line ? `#L${line}` : ''}`
 }
 
-function findingHeader(mission: Mission, round: ReviewRound, f: Finding): string {
+function findingMeta(mission: Mission, round: ReviewRound, f: Finding): string {
   const parts = [`**${SEVERITY_LABELS[f.severity]}**`, f.category]
   if (f.file) {
     const label = f.line ? `${f.file}:${f.line}` : f.file
@@ -55,24 +62,49 @@ function findingHeader(mission: Mission, round: ReviewRound, f: Finding): string
   return parts.join(' · ')
 }
 
-function renderFinding(mission: Mission, round: ReviewRound, f: Finding): string[] {
-  const lines = [findingHeader(mission, round, f), `**${f.title.trim()}**`, '', f.body.trim()]
+function oneLine(text: string): string {
+  return text.replace(/\s+/g, ' ').trim()
+}
+
+function renderFinding(mission: Mission, round: ReviewRound, f: Finding, n: number): string[] {
+  const lines = [`#### ${n}. ${oneLine(f.title)}`, findingMeta(mission, round, f), '', f.body.trim()]
   if (f.suggestion?.trim()) {
     lines.push('', '<details>', '<summary>Suggestion</summary>', '', f.suggestion.trim(), '', '</details>')
   }
   return lines
 }
 
+/** A table the author can copy into their reply, one row per numbered finding. */
+function replyTemplate(round: ReviewRound, findings: Finding[]): string[] {
+  const cell = (text: string) => oneLine(text).replace(/\|/g, '\\|')
+  return [
+    '<details>',
+    '<summary>Reply template</summary>',
+    '',
+    '```markdown',
+    `### Round ${round.index} findings: disposition`,
+    '',
+    '| # | Finding | Outcome |',
+    '| --- | --- | --- |',
+    ...findings.map((f, i) => `| ${i + 1} | ${cell(f.title)} | ${f.severity === 'praise' ? '—' : ''} |`),
+    '```',
+    '',
+    '</details>'
+  ]
+}
+
 /** Fills the signature template; unknown placeholders render as empty. */
-export function renderSignature({ mission, round, settings, login }: BuildCommentArgs): string {
+export function renderSignature({ mission, round, settings, login, autoPosted }: BuildCommentArgs): string {
   const loadout = settings.loadouts.find((l) => l.id === mission.loadoutId)?.name ?? mission.loadoutId
   const slotId = mission.slotId ?? mission.preferredSlotId
-  const character = (slotId && settings.slots.find((s) => s.id === slotId)?.name) || 'a reviewer'
+  const reviewer = (slotId && settings.slots.find((s) => s.id === slotId)?.name) || 'a reviewer'
   const values: Record<string, string> = {
+    type: loadout,
     loadout,
-    character,
+    reviewer,
+    character: reviewer,
     login: login ?? '',
-    approval: mission.autoPost ? 'Posted automatically' : `Findings approved by ${login ?? 'you'}`,
+    approval: (autoPosted ?? mission.autoPost) ? 'Posted automatically' : `Findings approved by ${login ?? 'you'}`,
     round: String(round.index),
     sha: shortSha(round.headSha)
   }
@@ -80,8 +112,8 @@ export function renderSignature({ mission, round, settings, login }: BuildCommen
 }
 
 export function buildComment(args: BuildCommentArgs): string {
-  const { mission, round } = args
-  const approved = round.findings.filter((f) => f.decision === 'approved').sort(compareFindings)
+  const { mission, round, settings } = args
+  const approved = postedFindings(round)
   const head = shortSha(round.headSha)
   const count = approved.length
 
@@ -97,7 +129,12 @@ export function buildComment(args: BuildCommentArgs): string {
   if (count === 0) {
     lines.push('', 'No findings to report.')
   } else {
-    for (const f of approved) lines.push('', ...renderFinding(mission, round, f))
+    approved.forEach((f, i) => lines.push('', ...renderFinding(mission, round, f, i + 1)))
+  }
+
+  const request = settings.replyRequest?.trim()
+  if (request && approved.some((f) => f.severity !== 'praise')) {
+    lines.push('', request, '', ...replyTemplate(round, approved))
   }
 
   const signature = renderSignature(args)

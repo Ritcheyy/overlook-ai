@@ -87,3 +87,21 @@ describe('store selectors', () => {
     expect(useAppStore.getState().selectedMissionId).toBe('second')
   })
 })
+
+describe('openDetails', () => {
+  const at = '2026-09-13T12:00:00Z'
+  const closedPr = { ...prs[0], id: 'acme/checkout-api#9', number: 9, state: 'merged' as const }
+  const closed: Mission = { ...mission('old', 0, 'closed', at, [{ at, to: 'queued' }]), prId: closedPr.id, pr: closedPr }
+  const live = mission('live', 1, 'watching', at, [{ at, to: 'queued' }])
+
+  it("opens a PR's live review, the PR itself when nothing reviews it, or its last review once it is gone", () => {
+    useAppStore.setState({ snapshot: { ...snapshot, missions: [closed, live] }, screen: 'floor', selectedMissionId: undefined, selectedPrId: undefined })
+    useAppStore.getState().openDetails({ prId: prs[1].id })
+    expect(useAppStore.getState()).toMatchObject({ screen: 'triage', selectedMissionId: 'live', selectedPrId: undefined })
+    useAppStore.getState().openDetails({ prId: prs[3].id })
+    expect(useAppStore.getState()).toMatchObject({ selectedMissionId: undefined, selectedPrId: prs[3].id })
+    useAppStore.getState().openDetails({ prId: closedPr.id })
+    expect(useAppStore.getState()).toMatchObject({ selectedMissionId: 'old', selectedPrId: undefined })
+  })
+})
+

@@ -17,6 +17,7 @@ export function RoundDetails({ round, className }: RoundDetailsProps) {
   if (round.durationMs !== undefined) parts.push(`took ${formatDuration(round.durationMs)}`)
   if (round.model) parts.push(round.effort ? `${round.model} (effort ${round.effort})` : round.model)
   else if (round.effort) parts.push(`effort ${round.effort}`)
+  if (round.budgetUsd !== undefined) parts.push(`budget ${formatCost(round.budgetUsd)}`)
   if (parts.length === 0 && !round.rawOutput) return null
   return (
     <div className={cn('flex flex-col gap-1.5', className)}>

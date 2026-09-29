@@ -7,7 +7,9 @@ describe('defaultSettings', () => {
     expect(s.claudeModel).toBe('opus')
     expect(s.claudeFallbackModel).toBeUndefined()
     expect(s.maxAutoRoundsPerMission).toBe(0)
-    expect(s.signature).toBe('{loadout} · Reviewed by {character} · {approval}')
+    expect(s.signature).toBe('{type} · Reviewed by {reviewer} · {approval}')
+    expect(s.replyRequest).toContain('reply to this comment')
+    expect(s.fileLinks).toBe('vscode')
   })
 
   it('keeps an explicit empty model and applies overrides', () => {

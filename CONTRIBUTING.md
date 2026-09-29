@@ -53,7 +53,7 @@ Tests never call the real `claude` CLI or GitHub. Adapters take an injected `exe
 
 ## Adding things
 
-- **A loadout** (review style): add it to `BUILT_IN_LOADOUTS` in `src/core/loadouts.ts`. The prompt text is appended to the generated review prompt.
+- **A review type** (a loadout in code): add it to `BUILT_IN_LOADOUTS` in `src/core/loadouts.ts`. The prompt text is appended to the generated review prompt. The UI's review, review type and reviewer are the code's mission, loadout and slot.
 - **A finding category or severity**: extend the union in `src/core/domain.ts`, the lists in `src/core/review/schema.ts`, the colour map in the triage `FindingCard`, and the comment builder's ordering if needed.
 - **A setting**: add it to `Settings` and `defaultSettings`, back-fill it in `sanitizeSettings`, expose it in the settings screen, and cover the persistence round-trip in `src/core/engine/api-server.test.ts`.
 - **A new git host**: implement `GitHubPort` for it in `src/main/adapters`, plus a fake in `src/core/mocks`. The engine never talks to a host directly.

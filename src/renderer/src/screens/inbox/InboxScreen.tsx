@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
-import { ChevronDown, FolderGit2, Inbox as InboxIcon, LoaderCircle, Search, SearchX } from 'lucide-react'
+import { useMemo, useState, type KeyboardEvent, type MouseEvent } from 'react'
+import { FolderGit2, Github, Inbox as InboxIcon, Search, SearchX } from 'lucide-react'
 import type { Mission, PullRequest, Settings } from '@core/domain'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/cn'
@@ -7,14 +7,18 @@ import { plural, relativeTime } from '@/lib/format'
 import { selectInbox, selectMissions, selectSettings, useAppStore } from '@/state/store'
 import { Button } from '@/components/ui/Button'
 import { Chip } from '@/components/ui/Chip'
-import { Dropdown, MenuItem, MenuLabel, MenuSeparator } from '@/components/ui/Dropdown'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { IconButton } from '@/components/ui/IconButton'
 import { Input } from '@/components/ui/Input'
 import { Segmented } from '@/components/ui/Segmented'
+import { PrMarkers } from '@/components/app/PrMarkers'
+import { ReviewSplitButton } from '@/components/app/ReviewSplitButton'
 import { StateChip } from '@/components/app/StateChip'
 import { useNow } from '@/components/app/useNow'
+import { useMissionActions } from '../triage/useMissionActions'
 
-type Filter = 'all' | 'requested' | 'mine'
+/** "To review" is everyone else's PRs: requested of you, or still under your review after the request went away. */
+type Filter = 'all' | 'others' | 'mine'
 
 function matchesQuery(pr: PullRequest, q: string): boolean {
   if (!q) return true
@@ -26,112 +30,34 @@ function matchesQuery(pr: PullRequest, q: string): boolean {
     .every((term) => hay.includes(term))
 }
 
-function ReviewButton({ pr, settings }: { pr: PullRequest; settings: Settings }) {
-  const pushToast = useAppStore((s) => s.pushToast)
-  const anchor = useRef<HTMLDivElement>(null)
-  const [open, setOpen] = useState(false)
-  const [busy, setBusy] = useState(false)
-  // Undefined means "not chosen here": the engine falls back to the per-repo setting.
-  const [autoPost, setAutoPost] = useState<boolean | undefined>(undefined)
-  const close = useCallback(() => setOpen(false), [])
-  const repoAutoPost = settings.autoPostRepos.includes(pr.repo.fullName)
-  const defaultLoadout = settings.loadouts.find((l) => l.id === settings.defaultLoadoutId) ?? settings.loadouts[0]
-
-  const dispatch = async (loadoutId: string) => {
-    setOpen(false)
-    setBusy(true)
-    try {
-      await api.dispatch({ prId: pr.id, loadoutId, autoPost })
-    } catch (e) {
-      pushToast({ kind: 'error', title: `Could not dispatch #${pr.number}`, body: (e as Error).message })
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <>
-      <div
-        ref={anchor}
-        className={cn(
-          'inline-flex h-7 items-stretch overflow-hidden rounded-md border border-line bg-raised text-[12px] font-medium text-ink transition-colors',
-          'hover:border-faint/70',
-          busy && 'opacity-60'
-        )}
-      >
-        <button
-          type="button"
-          disabled={busy || !defaultLoadout}
-          onClick={() => defaultLoadout && dispatch(defaultLoadout.id)}
-          title={defaultLoadout ? `Review with ${defaultLoadout.name}` : 'No loadouts configured'}
-          className="inline-flex items-center gap-1.5 px-2.5 transition-colors hover:bg-surface disabled:pointer-events-none"
-        >
-          {busy && <LoaderCircle className="h-3.5 w-3.5 animate-spin" aria-hidden />}
-          Review
-        </button>
-        <button
-          type="button"
-          aria-label="Choose loadout"
-          aria-haspopup="menu"
-          aria-expanded={open}
-          disabled={busy}
-          onClick={() => setOpen((o) => !o)}
-          className="inline-flex items-center border-l border-line px-1.5 text-muted transition-colors hover:bg-surface hover:text-ink"
-        >
-          <ChevronDown className="h-3.5 w-3.5" aria-hidden />
-        </button>
-      </div>
-      <Dropdown open={open} onClose={close} anchorRef={anchor} align="end" width={300}>
-        <div role="menu" aria-label="Review options">
-          <MenuLabel>Review with</MenuLabel>
-          {settings.loadouts.map((l) => (
-            <MenuItem key={l.id} onClick={() => dispatch(l.id)} hint={l.id === settings.defaultLoadoutId ? 'default' : undefined}>
-              <div className="text-ink">{l.name}</div>
-              <div className="mt-0.5 text-[11px] leading-snug text-faint">{l.tagline}</div>
-            </MenuItem>
-          ))}
-          <MenuSeparator />
-          <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[12px] text-muted hover:bg-surface">
-            <input
-              type="checkbox"
-              className="h-3.5 w-3.5 accent-accent"
-              checked={autoPost ?? repoAutoPost}
-              onChange={(e) => setAutoPost(e.target.checked)}
-            />
-            <span className="flex-1">Post without triage</span>
-            {repoAutoPost && autoPost === undefined && <span className="text-[10.5px] text-faint">repo default</span>}
-          </label>
-        </div>
-      </Dropdown>
-    </>
-  )
-}
-
 function InboxRow({ pr, mission, settings, now }: { pr: PullRequest; mission?: Mission; settings: Settings; now: number }) {
-  const navigate = useAppStore((s) => s.navigate)
-  const openMission = () => {
-    if (!mission) return
-    const target = mission.state === 'needs_you' || mission.state === 'failed' ? 'triage' : 'floor'
-    navigate(target, { missionId: mission.id })
-  }
+  const openDetails = useAppStore((s) => s.openDetails)
+  const actions = useMissionActions()
+  const open = () => openDetails({ prId: pr.id, missionId: mission?.id })
+  // Buttons inside the row act on their own; everything else opens the details.
+  const stop = (e: MouseEvent | KeyboardEvent) => e.stopPropagation()
   return (
     <li
+      tabIndex={0}
+      onClick={open}
+      onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          open()
+        }
+      }}
       className={cn(
-        'group grid grid-cols-[56px_minmax(0,1fr)_auto] items-center gap-3 border-b border-line/60 py-2 pl-8 pr-5 transition-[background-color,opacity] hover:bg-surface/70',
+        'group grid cursor-pointer grid-cols-[56px_minmax(0,1fr)_auto] items-center gap-3 border-b border-line/60 py-2 pl-8 pr-4 outline-none transition-[background-color,opacity] hover:bg-surface/70 focus-visible:bg-surface/70',
         pr.isDraft && 'opacity-60 hover:opacity-100'
       )}
     >
       <span className="font-mono text-[12px] tabular-nums text-faint">#{pr.number}</span>
       <div className="min-w-0">
         <div className="flex min-w-0 items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => void api.openExternal(pr.url)}
-            title={`${pr.title}\n${pr.url}`}
-            className="min-w-0 truncate text-left text-[13px] text-ink hover:text-accent hover:underline"
-          >
+          <span className="min-w-0 truncate text-[13px] text-ink group-hover:text-accent" title={pr.title}>
             {pr.title}
-          </button>
+          </span>
           {pr.isDraft && <Chip tone="faint">DRAFT</Chip>}
           {pr.labels.map((l) => (
             <Chip key={l} tone="muted" className="hidden font-normal lg:inline-flex">
@@ -139,7 +65,7 @@ function InboxRow({ pr, mission, settings, now }: { pr: PullRequest; mission?: M
             </Chip>
           ))}
         </div>
-        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11.5px] text-faint">
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11.5px] text-faint">
           <span className="text-muted">{pr.author}</span>
           <span aria-hidden>·</span>
           <span title={pr.updatedAt}>{relativeTime(pr.updatedAt, now)}</span>
@@ -161,12 +87,26 @@ function InboxRow({ pr, mission, settings, now }: { pr: PullRequest; mission?: M
           )}
         </div>
       </div>
-      <div className="flex items-center justify-end">
+      <div className="flex items-center justify-end gap-2">
+        <PrMarkers pr={pr} mission={mission} className="justify-end" />
         {mission ? (
-          <StateChip state={mission.state} size="sm" onClick={openMission} title="Open mission" />
+          <StateChip state={mission.state} size="sm" />
         ) : (
-          <ReviewButton pr={pr} settings={settings} />
+          <span onClick={stop} onKeyDown={stop}>
+            <ReviewSplitButton
+              label="Review"
+              loadoutId={settings.defaultLoadoutId}
+              autoPost={settings.autoPostRepos.includes(pr.repo.fullName)}
+              title="Review with the default review type"
+              onStart={({ loadoutId, options }) => actions.dispatch(pr.id, loadoutId, options)}
+            />
+          </span>
         )}
+        <span onClick={stop} onKeyDown={stop}>
+          <IconButton size="sm" aria-label={`Open #${pr.number} on GitHub`} title={pr.url} onClick={() => void api.openExternal(pr.url)}>
+            <Github />
+          </IconButton>
+        </span>
       </div>
     </li>
   )
@@ -191,7 +131,7 @@ export function InboxScreen() {
   const counts = useMemo(
     () => ({
       all: inbox.length,
-      requested: inbox.filter((p) => p.reviewRequested).length,
+      others: inbox.filter((p) => !p.mine).length,
       mine: inbox.filter((p) => p.mine).length
     }),
     [inbox]
@@ -199,7 +139,7 @@ export function InboxScreen() {
 
   const groups = useMemo(() => {
     const q = query.trim()
-    const visible = inbox.filter((p) => (filter === 'requested' ? p.reviewRequested : filter === 'mine' ? p.mine : true)).filter((p) => matchesQuery(p, q))
+    const visible = inbox.filter((p) => (filter === 'others' ? !p.mine : filter === 'mine' ? p.mine : true)).filter((p) => matchesQuery(p, q))
     const byRepo = new Map<string, PullRequest[]>()
     for (const p of visible) byRepo.set(p.repo.fullName, [...(byRepo.get(p.repo.fullName) ?? []), p])
     return [...byRepo.entries()]
@@ -228,7 +168,7 @@ export function InboxScreen() {
           onChange={setFilter}
           options={[
             { value: 'all', label: 'All', count: counts.all },
-            { value: 'requested', label: 'Requested', count: counts.requested },
+            { value: 'others', label: 'To review', count: counts.others },
             { value: 'mine', label: 'Mine', count: counts.mine }
           ]}
         />

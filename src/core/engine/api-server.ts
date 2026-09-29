@@ -3,7 +3,7 @@
  * the `Api` contract plus push events. Composed by the Electron main process
  * (real adapters) and by the browser demo (mocks) alike.
  */
-import type { AppSnapshot, DetectedWorkspace, EnvironmentCheck, Settings } from '../domain'
+import type { AppSnapshot, DetectedWorkspace, EnvironmentCheck, FileLinkTarget, Settings } from '../domain'
 import { ENVIRONMENT_CHECK_LABELS } from '../domain'
 import type { Api, DemoSimulateArgs, Engine, PushEvent, PushEvents } from '../ipc-contract'
 import { RETIRED_SLASH_COMMANDS, defaultSettings } from '../loadouts'
@@ -28,6 +28,7 @@ export interface EngineOptions {
   relaunch?: () => Promise<void>
   demoControls?: {
     simulatePush?: (prId: string) => void
+    simulateReply?: (prId: string) => void
     simulateClose?: (prId: string, merged: boolean) => void
     simulateNewPullRequest?: () => void
     failNextReview?: () => void
@@ -38,6 +39,7 @@ const SNAPSHOT_COALESCE_MS = 10
 const PERSIST_DEBOUNCE_MS = 250
 const MAX_TIMER_DELAY_MS = 2 ** 31 - 1
 export const MIN_POLL_INTERVAL_SEC = 15
+const FILE_LINK_TARGETS: readonly FileLinkTarget[] = ['vscode', 'cursor', 'github']
 
 type Listeners = { [E in PushEvent]: Set<(payload: PushEvents[E]) => void> }
 
@@ -65,6 +67,8 @@ export function validateSettings(settings: Settings): void {
   if (!Array.isArray(settings.inactiveRepos) || settings.inactiveRepos.some((r) => typeof r !== 'string')) {
     throw new Error('inactiveRepos must be a list of owner/name strings')
   }
+  if (typeof settings.replyRequest !== 'string') throw new Error('replyRequest must be text')
+  if (!FILE_LINK_TARGETS.includes(settings.fileLinks)) throw new Error(`fileLinks must be one of ${FILE_LINK_TARGETS.join(', ')}`)
   if (!Array.isArray(settings.workspaces)) throw new Error('workspaces must be a list')
   const workspaceIds = new Set<string>()
   for (const ws of settings.workspaces) {
@@ -100,6 +104,8 @@ function sanitizeSettings(raw: unknown, defaults: Settings): Settings {
     merged.maxAutoRoundsPerMission = defaults.maxAutoRoundsPerMission
   }
   if (!Number.isInteger(merged.maxPrAgeDays) || merged.maxPrAgeDays < 0) merged.maxPrAgeDays = defaults.maxPrAgeDays
+  if (typeof merged.replyRequest !== 'string') merged.replyRequest = defaults.replyRequest
+  if (!FILE_LINK_TARGETS.includes(merged.fileLinks)) merged.fileLinks = defaults.fileLinks
   // An empty model is a deliberate "CLI default"; only a missing key takes the app default.
   if (merged.claudeModel === undefined) merged.claudeModel = defaults.claudeModel
   for (const key of ['projectsRoots', 'autoPostRepos', 'inactiveRepos'] as const) {
@@ -284,7 +290,7 @@ export function createEngine(opts: EngineOptions): Engine {
     if (slotsChanged) {
       const kept = new Set(next.slots.map((s) => s.id))
       const busy = state.slots.find((s) => s.missionId && !kept.has(s.id))
-      if (busy) throw new Error(`Slot '${busy.name}' is busy; wait for its mission to finish before removing it`)
+      if (busy) throw new Error(`${busy.name} is busy; wait for its review to finish before removing it`)
     }
     state.settings = next
     if (slotsChanged) sched.rebuildSlots()
@@ -327,6 +333,9 @@ export function createEngine(opts: EngineOptions): Engine {
       case 'push':
         controls.simulatePush?.(needPr())
         break
+      case 'reply':
+        controls.simulateReply?.(needPr())
+        break
       case 'close':
         controls.simulateClose?.(needPr(), false)
         break
@@ -349,7 +358,7 @@ export function createEngine(opts: EngineOptions): Engine {
     dispatch: (args) => sched.dispatch(args),
     cancelMission: async (id) => sched.cancelMission(id),
     retryMission: async (id) => sched.retryMission(id),
-    rerunMission: async (id, loadoutId) => sched.rerunMission(id, loadoutId),
+    rerunMission: async (id, loadoutId, options) => sched.rerunMission(id, loadoutId, options),
     closeMission: (id) => sched.closeMission(id, 'closed by user'),
     setFindingDecision: async (args) => sched.setFindingDecision(args),
     setFindingDecisions: async (args) => sched.setFindingDecisions(args),

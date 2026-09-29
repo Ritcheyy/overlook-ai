@@ -16,7 +16,7 @@ function readStored(page: Page): Promise<StoredDemoState | null> {
   }, STORAGE_KEY)
 }
 
-test('poll interval and character names survive a reload', async ({ page }) => {
+test('poll interval and reviewer names survive a reload', async ({ page }) => {
   await openApp(page)
   await goTo(page, 'Settings')
 
@@ -24,14 +24,14 @@ test('poll interval and character names survive a reload', async ({ page }) => {
   await expect(poll).toHaveValue('30')
   await poll.fill('45')
   await poll.press('Enter')
-  await expect(page.getByText('Saved', { exact: true })).toHaveClass(/opacity-100/)
+  await expect(page.getByText('Saved', { exact: true }).first()).toHaveClass(/opacity-100/)
   await expect(poll).toHaveValue('45')
 
-  const desk1 = page.getByLabel('Desk 1')
-  await expect(desk1).toHaveValue('Vhagar')
-  await desk1.fill('Ripley')
-  await desk1.press('Enter')
-  await expect(desk1).toHaveValue('Ripley')
+  const reviewer1 = page.getByLabel('Reviewer 1')
+  await expect(reviewer1).toHaveValue('Vhagar')
+  await reviewer1.fill('Ripley')
+  await reviewer1.press('Enter')
+  await expect(reviewer1).toHaveValue('Ripley')
   await expect(page.getByLabel('Ripley color hex')).toHaveValue('#f5b544')
 
   await expect.poll(async () => (await readStored(page))?.settings.pollIntervalSec).toBe(45)
@@ -41,8 +41,8 @@ test('poll interval and character names survive a reload', async ({ page }) => {
   await expect(page.getByText('@ritchey')).toBeVisible()
   await goTo(page, 'Settings')
   await expect(page.getByLabel('Poll interval')).toHaveValue('45')
-  await expect(page.getByLabel('Desk 1')).toHaveValue('Ripley')
-  await expect(page.getByLabel('Desk 2')).toHaveValue('Nova')
+  await expect(page.getByLabel('Reviewer 1')).toHaveValue('Ripley')
+  await expect(page.getByLabel('Reviewer 2')).toHaveValue('Nova')
   await expect(page.getByRole('switch', { name: 'Demo mode' })).toHaveAttribute('aria-checked', 'true')
   await expect(page.getByLabel('Automatic follow-up rounds')).toHaveValue('0')
 

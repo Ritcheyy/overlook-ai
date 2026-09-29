@@ -5,8 +5,9 @@
  * result only identifies a PR and the detail payload fills it in.
  */
 import { z } from 'zod'
-import type { PullRequest, PullRequestState } from '@core/domain'
+import type { PrComment, PullRequest, PullRequestState, ReviewDecision } from '@core/domain'
 import { prIdOf, repoRefFromFullName } from '@core/domain'
+import type { PullRequestDetail } from '@core/ports'
 
 const actor = z.object({ login: z.string() }).passthrough()
 const label = z.object({ name: z.string() }).passthrough()
@@ -47,7 +48,20 @@ export const ghPrDetailSchema = z
     updatedAt: z.string(),
     reviewRequests: z
       .array(z.object({ login: z.string().optional(), name: z.string().optional(), slug: z.string().optional() }).passthrough())
-      .default([])
+      .default([]),
+    reviewDecision: z.string().nullish(),
+    comments: z
+      .array(
+        z
+          .object({
+            author: actor.nullish(),
+            body: z.string().nullish(),
+            createdAt: z.string(),
+            url: z.string()
+          })
+          .passthrough()
+      )
+      .optional()
   })
   .passthrough()
 
@@ -98,6 +112,23 @@ export function mapPrState(state: string, mergedAt?: string | null): PullRequest
   }
 }
 
+export function mapReviewDecision(value: string | null | undefined): ReviewDecision | undefined {
+  switch ((value ?? '').toUpperCase()) {
+    case 'APPROVED':
+      return 'approved'
+    case 'CHANGES_REQUESTED':
+      return 'changes_requested'
+    case 'REVIEW_REQUIRED':
+      return 'review_required'
+    default:
+      return undefined
+  }
+}
+
+export function mapComments(d: GhPrDetail): PrComment[] | undefined {
+  return d.comments?.map((c) => ({ url: c.url, author: c.author?.login || GHOST, body: c.body ?? '', createdAt: c.createdAt }))
+}
+
 export function searchItemId(item: GhSearchPr): string {
   return prIdOf(item.repository.nameWithOwner, item.number)
 }
@@ -105,6 +136,7 @@ export function searchItemId(item: GhSearchPr): string {
 export function mapDetailToPullRequest(fullName: string, d: GhPrDetail, ctx: MapContext = {}): PullRequest {
   const author = d.author?.login || GHOST
   const requested = d.reviewRequests.some((r) => sameLogin(r.login, ctx.me))
+  const decision = mapReviewDecision(d.reviewDecision)
   return {
     id: prIdOf(fullName, d.number),
     repo: repoRefFromFullName(fullName),
@@ -125,6 +157,15 @@ export function mapDetailToPullRequest(fullName: string, d: GhPrDetail, ctx: Map
     changedFiles: d.changedFiles,
     labels: d.labels.map((l) => l.name),
     reviewRequested: !!ctx.reviewRequested || requested,
-    mine: sameLogin(author, ctx.me)
+    mine: sameLogin(author, ctx.me),
+    ...(decision && { reviewDecision: decision })
   }
+}
+
+/** The PR plus its conversation, when the payload carried one. */
+export function mapDetail(fullName: string, d: GhPrDetail, ctx: MapContext = {}): PullRequestDetail {
+  const pr: PullRequestDetail = mapDetailToPullRequest(fullName, d, ctx)
+  const comments = mapComments(d)
+  if (comments) pr.comments = comments
+  return pr
 }

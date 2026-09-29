@@ -47,21 +47,35 @@ export interface PullRequest {
   reviewRequested: boolean
   /** I authored this PR (self-review candidate). */
   mine: boolean
+  /** GitHub's own review decision, from every reviewer on the PR; absent when GitHub reports none. */
+  reviewDecision?: ReviewDecision
+}
+
+export type ReviewDecision = 'approved' | 'changes_requested' | 'review_required'
+
+/** A conversation comment on a pull request. */
+export interface PrComment {
+  /** The URL GitHub gives the comment (`…#issuecomment-<id>`). */
+  url: string
+  author: string
+  body: string
+  createdAt: string
 }
 
 /**
- * Mission lifecycle:
+ * Mission lifecycle (a "review" in the UI):
  *
  *   queued ──▶ preparing ──▶ reviewing ──▶ needs_you ──▶ posting ──▶ watching
  *                 │              │             ▲                        │
- *                 ▼              ▼             │ (rerun)     (new push) │
+ *                 ▼              ▼             │ (rerun)  (reply + push)│
  *               failed ◀───── failed          └────────────────────────┘
  *
  *   any ──▶ closed   (PR merged/closed, or user closes the mission)
  *
  * A mission occupies a slot (a character at a desk) from `preparing` until it
  * reaches `watching`, `failed`, or `closed`. `watching` keeps the worktree but
- * frees the slot; a new push re-queues the mission (preferring its old slot).
+ * frees the slot; the author's reply to the posted round plus a push re-queues
+ * the mission (preferring its old slot) while the automatic round cap allows.
  */
 export type MissionState =
   | 'queued'
@@ -115,6 +129,21 @@ export type RawFinding = Omit<Finding, 'id' | 'decision' | 'dropReason' | 'dropN
 
 export type Verdict = 'approve' | 'request_changes' | 'comment'
 
+/** What started a round: the first review, the user, a retry, or the author's reply to the last posted round. */
+export type RoundTrigger = 'dispatch' | 'rerun' | 'retry' | 'reply'
+
+/**
+ * Choices made for one run in place of the settings defaults. Empty strings
+ * mean "let the CLI decide", unlike an absent key, which keeps the setting.
+ */
+export interface RunOptions {
+  model?: string
+  effort?: '' | NonNullable<Settings['claudeEffort']>
+  maxBudgetUsd?: number
+  /** Post the findings without stopping for triage. */
+  autoPost?: boolean
+}
+
 export interface ReviewRound {
   id: string
   /** 1-based; a new push after posting starts round n+1. */
@@ -146,6 +175,11 @@ export interface ReviewRound {
   model?: string
   /** Effort level the round ran with; `default` when the CLI chose. */
   effort?: string
+  /** The budget cap the round ran under. */
+  budgetUsd?: number
+  trigger?: RoundTrigger
+  /** The author's replies to the previous round that this round was given; bodies are trimmed. */
+  replies?: PrComment[]
 }
 
 export interface MissionEvent {
@@ -175,8 +209,20 @@ export interface Mission {
   /** True when a push arrived while findings were waiting for triage. */
   stale: boolean
   autoPost: boolean
-  /** Re-queue automatically when the author pushes. Undefined means true. */
+  /** Start follow-up rounds on their own when the author replies and pushes. Undefined means true. */
   autoFollowUp?: boolean
+  /** The PR author's comments since the last posted round, excluding the app's own; refreshed every poll. */
+  authorReplies?: PrComment[]
+  /**
+   * When the conversation was last read for replies, set from the moment a
+   * round is posted. Absent on reviews watched before replies were tracked,
+   * whose first read only records what is there, without notifying.
+   */
+  repliesCheckedAt?: string
+  /** Options for the next run only; cleared once a run produces a review. */
+  runOptions?: RunOptions
+  /** What queued the next run; recorded on the round it starts. */
+  nextTrigger?: RoundTrigger
   error?: string
   createdAt: string
   updatedAt: string
@@ -268,9 +314,10 @@ export interface Settings {
   /** Repos whose approved findings post without a triage stop. */
   autoPostRepos: string[]
   /**
-   * How many follow-up rounds a mission may start on its own after pushes.
-   * Past this the mission is marked stale and waits for a manual re-run,
-   * so an active author cannot burn budget unattended.
+   * How many follow-up rounds a mission may start on its own, each needing
+   * the author's reply to the last posted round plus a push. Past this the
+   * mission waits for a manual re-run, so an active author cannot burn budget
+   * unattended.
    */
   maxAutoRoundsPerMission: number
   /** Shell command run inside a fresh worktree, keyed by `owner/name`. */
@@ -286,6 +333,13 @@ export interface Settings {
    * once rendered means no signature.
    */
   signature: string
+  /**
+   * Closing request in comments that post findings, asking the author to
+   * reply with a disposition per finding once fixes are pushed. Empty for none.
+   */
+  replyRequest: string
+  /** Where a finding's file link opens: an editor at the line in the worktree, or GitHub. */
+  fileLinks: FileLinkTarget
   /** Include PRs I authored in the inbox for self-review. */
   includeMine: boolean
   /** `owner/name` repos switched off in Settings: hidden from the inbox and never fetched in detail. */
@@ -295,6 +349,8 @@ export interface Settings {
   /** Groups of repos reviewed with each other in view; detected entries are refreshed on every scan. */
   workspaces: Workspace[]
 }
+
+export type FileLinkTarget = 'vscode' | 'cursor' | 'github'
 
 export interface AppSnapshot {
   inbox: PullRequest[]
@@ -361,4 +417,27 @@ export function missionHoldsSlot(state: MissionState): boolean {
 
 export function latestRound(mission: Mission): ReviewRound | undefined {
   return mission.rounds[mission.rounds.length - 1]
+}
+
+/** The newest round that reached the PR; follow-ups build on it and replies are counted from it. */
+export function lastPostedRound(mission: Pick<Mission, 'rounds'>): ReviewRound | undefined {
+  for (let i = mission.rounds.length - 1; i >= 0; i--) {
+    if (mission.rounds[i].postedAt) return mission.rounds[i]
+  }
+  return undefined
+}
+
+/** Queue note of an automatic follow-up started by versions before rounds recorded their trigger. */
+const LEGACY_AUTO_ROUND = /^new push [0-9a-f]{7}$/
+
+/** Rounds the mission started on its own; the cap in settings counts only these. */
+export function autoRoundsUsed(mission: Pick<Mission, 'rounds' | 'timeline'>): number {
+  const recorded = mission.rounds.filter((r) => r.trigger === 'reply').length
+  const legacy = mission.timeline.filter((e) => e.from === 'watching' && e.to === 'queued' && !!e.note && LEGACY_AUTO_ROUND.test(e.note)).length
+  return recorded + legacy
+}
+
+/** The numeric id at the end of a comment URL, so URLs that differ only in host or path still match. */
+export function commentIdOf(url: string): string {
+  return /issuecomment-(\d+)/.exec(url)?.[1] ?? url
 }

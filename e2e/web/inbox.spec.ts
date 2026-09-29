@@ -10,7 +10,7 @@ const SEED: { repo: string; numbers: number[] }[] = [
   { repo: 'acme/storefront-web', numbers: [1203, 1210] }
 ]
 
-test('lists the seed inbox grouped by repo, filters to mine, and narrows by search', async ({ page }) => {
+test('lists the seed inbox grouped by repo, filters to mine, narrows by search, and opens a PR on a row click', async ({ page }) => {
   await openApp(page)
   await expect(page.getByText('Overlook', { exact: true })).toBeVisible()
 
@@ -37,7 +37,7 @@ test('lists the seed inbox grouped by repo, filters to mine, and narrows by sear
   await expect(inboxRow(page, 1210)).toBeVisible()
   await expect(inboxRow(page, 412)).toHaveCount(0)
 
-  await filter.getByRole('button', { name: /^Requested/ }).click()
+  await filter.getByRole('button', { name: /^To review/ }).click()
   await expect(page.getByText('4 pull requests', { exact: true })).toBeVisible()
 
   await filter.getByRole('button', { name: /^All/ }).click()
@@ -56,6 +56,12 @@ test('lists the seed inbox grouped by repo, filters to mine, and narrows by sear
   await page.getByRole('button', { name: 'Clear filters' }).click()
   await expect(page.getByText('6 pull requests', { exact: true })).toBeVisible()
   await expect(search).toHaveValue('')
+
+  // The row opens the PR's details in the app; GitHub is its own icon.
+  await inboxRow(page, 77).getByText('chore: bump react-native to 0.76 and fix hermes flags').click()
+  await expect(page.getByRole('heading', { name: 'chore: bump react-native to 0.76 and fix hermes flags' })).toBeVisible()
+  await expect(page.locator('[data-status]')).toContainText('Not reviewed yet.')
+  await expect(page.getByText('@kwame-builds')).toBeVisible()
 
   expect(errorsOn(page)).toEqual([])
 })

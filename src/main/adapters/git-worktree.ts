@@ -122,7 +122,12 @@ export class GitWorktree implements WorktreePort {
       say(`Checking out ${shortSha(sha)}`)
       const checkout = await this.git(wt, ['checkout', '--force', '--detach', sha], signal)
       if (checkout.code !== 0) {
-        // A worktree whose metadata went stale (main repo moved or re-cloned) is rebuilt rather than surfaced.
+        // Only a worktree git no longer recognises (main repo moved or re-cloned) is rebuilt. A
+        // healthy one that failed to check out (a lock, a permission) may hold the user's own
+        // files, so the failure is surfaced and the folder left alone.
+        if (await this.isWorkingTree(wt, signal)) {
+          throw new Error(`Checking out ${shortSha(sha)} in ${wt} failed (exit ${checkout.code}): ${lastLines(checkout.stderr)}`)
+        }
         say('Rebuilding stale worktree')
         await this.createFresh(repo, wt, sha, signal, say)
         fresh = true
@@ -153,8 +158,13 @@ export class GitWorktree implements WorktreePort {
   async exists(worktreePath: string): Promise<boolean> {
     const wt = resolve(expandHome(worktreePath))
     if (!(await isDirectory(wt))) return false
+    return this.isWorkingTree(wt)
+  }
+
+  /** True when git sees `wt` itself as the top of a working tree. */
+  private async isWorkingTree(wt: string, signal?: AbortSignal): Promise<boolean> {
     // --is-inside-work-tree alone is true for any folder under a repository (a dotfiles home included).
-    const res = await this.git(wt, ['rev-parse', '--show-toplevel'])
+    const res = await this.git(wt, ['rev-parse', '--show-toplevel'], signal)
     return res.code === 0 && (await canonical(res.stdout.trim())) === (await canonical(wt))
   }
 

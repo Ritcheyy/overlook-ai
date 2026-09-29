@@ -112,6 +112,7 @@ export function createDemoEngine(opts: DemoEngineOptions = {}): Engine {
     relaunch: async () => undefined,
     demoControls: {
       simulatePush: (prId) => void github.simulatePush(prId),
+      simulateReply: (prId) => void github.simulateReply(prId),
       simulateClose: (prId, merged) => void github.simulateClose(prId, merged),
       simulateNewPullRequest: () => void github.simulateNewPullRequest(),
       failNextReview: () => {

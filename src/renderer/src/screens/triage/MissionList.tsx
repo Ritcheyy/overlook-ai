@@ -1,25 +1,49 @@
-import { useEffect, useState } from 'react'
-import { ChevronRight } from 'lucide-react'
-import type { Mission, Slot } from '@core/domain'
-import { latestRound } from '@core/domain'
+import type { Mission, MissionState } from '@core/domain'
 import { cn } from '@/lib/cn'
-import { plural, relativeTime } from '@/lib/format'
-import { Chip } from '@/components/ui/Chip'
+import { relativeTime } from '@/lib/format'
+import { hasUpdates, repoShortName } from '@/lib/review'
+import type { TriageFilter } from '@/state/store'
+import { PrMarkers } from '@/components/app/PrMarkers'
 import { StateChip } from '@/components/app/StateChip'
-import { slotFor } from './shared'
 
-interface ItemProps {
-  mission: Mission
-  slots: Slot[]
-  selected: boolean
-  now: number
-  onSelect: () => void
+const IN_PROGRESS: readonly MissionState[] = ['queued', 'preparing', 'reviewing', 'posting']
+
+function matches(m: Mission, q: string): boolean {
+  if (!q) return true
+  const hay = [`#${m.pr.number}`, m.pr.title, m.pr.author, m.pr.repo.fullName, m.pr.headRef].join(' ').toLowerCase()
+  return q
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .every((term) => hay.includes(term))
 }
 
-function MissionListItem({ mission, slots, selected, now, onSelect }: ItemProps) {
-  const slot = slotFor(mission, slots)
-  const round = latestRound(mission)
-  const showState = mission.state !== 'needs_you' && mission.state !== 'failed'
+const byUpdatedDesc = (a: Mission, b: Mission) => b.updatedAt.localeCompare(a.updatedAt)
+
+export interface ReviewGroups {
+  needsYou: Mission[]
+  failed: Mission[]
+  inProgress: Mission[]
+  watching: Mission[]
+}
+
+/** Live reviews by what they need; closed ones live in the Log. Watched reviews with a push or reply come first. */
+export function groupReviews(missions: readonly Mission[], filter: TriageFilter, query: string): ReviewGroups {
+  const q = query.trim()
+  const live = missions.filter((m) => m.state !== 'closed' && matches(m, q))
+  const shown = filter === 'updates' ? live.filter(hasUpdates) : filter === 'needs_you' ? live.filter((m) => m.state === 'needs_you') : live
+  return {
+    needsYou: shown.filter((m) => m.state === 'needs_you').sort(byUpdatedDesc),
+    failed: shown.filter((m) => m.state === 'failed').sort(byUpdatedDesc),
+    inProgress: shown.filter((m) => IN_PROGRESS.includes(m.state)).sort(byUpdatedDesc),
+    watching: shown
+      .filter((m) => m.state === 'watching')
+      .sort((a, b) => Number(hasUpdates(b)) - Number(hasUpdates(a)) || byUpdatedDesc(a, b))
+  }
+}
+
+function Row({ mission, selected, now, onSelect, showState }: { mission: Mission; selected: boolean; now: number; onSelect: () => void; showState: boolean }) {
+  const { pr } = mission
   return (
     <li>
       <button
@@ -31,91 +55,58 @@ function MissionListItem({ mission, slots, selected, now, onSelect }: ItemProps)
           selected ? 'bg-raised shadow-[inset_2px_0_0_rgb(var(--accent))]' : 'hover:bg-surface'
         )}
       >
-        <div className="flex w-full items-center gap-1.5">
-          <span className="shrink-0 font-mono text-[11px] text-faint">#{mission.pr.number}</span>
-          <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink">{mission.pr.title}</span>
-          {mission.stale && <Chip tone="amber">new push</Chip>}
+        <div className="flex w-full items-start gap-1.5">
+          <span className="mt-px shrink-0 font-mono text-[11px] text-faint">#{pr.number}</span>
+          <span className="line-clamp-2 min-w-0 flex-1 text-[12.5px] leading-snug text-ink">{pr.title}</span>
           {showState && <StateChip state={mission.state} />}
         </div>
-        <div className="flex w-full items-center gap-2 text-[11px] text-faint">
-          <span className="min-w-0 truncate">{mission.pr.repo.fullName}</span>
-          {slot && (
-            <span className="inline-flex shrink-0 items-center gap-1">
-              <span className="h-1.5 w-1.5 rounded-full" style={{ background: slot.color }} aria-hidden />
-              {slot.name}
-            </span>
-          )}
-          {round && (
-            <span className="shrink-0">
-              R{round.index} · {plural(round.findings.length, 'finding')}
-            </span>
-          )}
+        <div className="flex w-full items-center gap-1.5 text-[11px] text-faint">
+          <span className="min-w-0 truncate">
+            <span className="text-muted">{repoShortName(pr.repo.fullName)}</span> · {pr.author}
+          </span>
           <span className="ml-auto shrink-0" title={mission.updatedAt}>
             {relativeTime(mission.updatedAt, now)}
           </span>
         </div>
+        <PrMarkers pr={pr} mission={mission} className="text-[11px]" />
       </button>
     </li>
   )
 }
 
-function GroupHeader({ label, count, tone }: { label: string; count: number; tone?: string }) {
+function Group({ label, tone, missions, selectedId, now, onSelect, showState }: { label: string; tone: string; missions: Mission[]; selectedId?: string; now: number; onSelect: (id: string) => void; showState?: boolean }) {
+  if (missions.length === 0) return null
   return (
-    <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-bg/95 px-3 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-faint backdrop-blur">
-      {tone && <span className={cn('h-1.5 w-1.5 rounded-full', tone)} aria-hidden />}
-      <span>{label}</span>
-      <span className="font-normal tabular-nums text-faint/70">{count}</span>
-    </div>
+    <section aria-label={label}>
+      <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-bg/95 px-3 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-faint backdrop-blur">
+        <span className={cn('h-1.5 w-1.5 rounded-full', tone)} aria-hidden />
+        <span>{label}</span>
+        <span className="font-normal tabular-nums text-faint/70">{missions.length}</span>
+      </div>
+      <ul>
+        {missions.map((m) => (
+          <Row key={m.id} mission={m} selected={m.id === selectedId} now={now} onSelect={() => onSelect(m.id)} showState={!!showState} />
+        ))}
+      </ul>
+    </section>
   )
 }
 
 export interface MissionListProps {
-  needsYou: Mission[]
-  failed: Mission[]
-  recent: Mission[]
-  slots: Slot[]
+  groups: ReviewGroups
   selectedId?: string
   now: number
   onSelect: (id: string) => void
 }
 
-export function MissionList({ needsYou, failed, recent, slots, selectedId, now, onSelect }: MissionListProps) {
-  const [recentOpen, setRecentOpen] = useState(false)
-  const selectedInRecent = recent.some((m) => m.id === selectedId)
-  // Reveal a selection that lands in Recent, but let the user collapse the group afterwards.
-  useEffect(() => {
-    if (selectedInRecent) setRecentOpen(true)
-  }, [selectedId, selectedInRecent])
-  const item = (m: Mission) => <MissionListItem key={m.id} mission={m} slots={slots} selected={m.id === selectedId} now={now} onSelect={() => onSelect(m.id)} />
+export function MissionList({ groups, selectedId, now, onSelect }: MissionListProps) {
+  const common = { selectedId, now, onSelect }
   return (
-    <nav className="min-h-0 flex-1 overflow-auto" aria-label="Missions">
-      {needsYou.length > 0 && (
-        <section aria-label="Needs you">
-          <GroupHeader label="Needs you" count={needsYou.length} tone="bg-amber" />
-          <ul>{needsYou.map(item)}</ul>
-        </section>
-      )}
-      {failed.length > 0 && (
-        <section aria-label="Failed">
-          <GroupHeader label="Failed" count={failed.length} tone="bg-rose" />
-          <ul>{failed.map(item)}</ul>
-        </section>
-      )}
-      {recent.length > 0 && (
-        <section aria-label="Recent">
-          <button
-            type="button"
-            aria-expanded={recentOpen}
-            onClick={() => setRecentOpen((o) => !o)}
-            className="sticky top-0 z-10 flex w-full items-center gap-1.5 border-b border-line bg-bg/95 px-3 py-1.5 text-left text-[10.5px] font-semibold uppercase tracking-wider text-faint backdrop-blur hover:text-muted"
-          >
-            <ChevronRight className={cn('h-3 w-3 transition-transform', recentOpen && 'rotate-90')} aria-hidden />
-            <span>Recent</span>
-            <span className="font-normal tabular-nums text-faint/70">{recent.length}</span>
-          </button>
-          {recentOpen && <ul>{recent.map(item)}</ul>}
-        </section>
-      )}
+    <nav className="min-h-0 flex-1 overflow-auto" aria-label="Reviews">
+      <Group label="Needs you" tone="bg-amber" missions={groups.needsYou} {...common} />
+      <Group label="Failed" tone="bg-rose" missions={groups.failed} {...common} />
+      <Group label="In progress" tone="bg-accent" missions={groups.inProgress} showState {...common} />
+      <Group label="Watching" tone="bg-teal" missions={groups.watching} {...common} />
     </nav>
   )
 }

@@ -12,6 +12,7 @@ import type {
   LocalRepo,
   Mission,
   Notification,
+  RunOptions,
   Settings
 } from './domain'
 
@@ -20,6 +21,8 @@ export interface DispatchArgs {
   loadoutId?: string
   /** Overrides the per-repo autoPost setting for this mission. */
   autoPost?: boolean
+  /** Model, effort and budget for the first run instead of the settings defaults. */
+  options?: RunOptions
 }
 
 export interface FindingDecisionArgs {
@@ -60,11 +63,11 @@ export interface NavigateArgs {
   missionId?: string
 }
 
-export type DemoEventKind = 'push' | 'close' | 'merge' | 'new_pr' | 'fail_next_review'
+export type DemoEventKind = 'push' | 'reply' | 'close' | 'merge' | 'new_pr' | 'fail_next_review'
 
 export interface DemoSimulateArgs {
   kind: DemoEventKind
-  /** Required for push/close/merge. */
+  /** Required for push/reply/close/merge. */
   prId?: string
 }
 
@@ -77,16 +80,16 @@ export interface Api {
   cancelMission(missionId: string): Promise<void>
   /** `failed` -> `queued`. */
   retryMission(missionId: string): Promise<void>
-  /** Start a fresh round on the current head (from `needs_you`, `watching` or `failed`), optionally with another loadout. */
-  rerunMission(missionId: string, loadoutId?: string): Promise<void>
+  /** Start a fresh round on the current head (from `needs_you`, `watching` or `failed`), optionally with another loadout and run options. */
+  rerunMission(missionId: string, loadoutId?: string, options?: RunOptions): Promise<void>
   /** Remove the worktree and end the mission. */
   closeMission(missionId: string): Promise<void>
   setFindingDecision(args: FindingDecisionArgs): Promise<void>
   setFindingDecisions(args: BulkFindingDecisionArgs): Promise<void>
-  /** Markdown of the comment that `postComment` would send. */
   /** Edit the summary that heads the posted comment; allowed while the round is un-posted. */
   setRoundSummary(args: SetRoundSummaryArgs): Promise<void>
   setAutoFollowUp(args: SetAutoFollowUpArgs): Promise<void>
+  /** Markdown of the comment that `postComment` would send. */
   previewComment(missionId: string): Promise<string>
   postComment(missionId: string): Promise<{ url: string }>
   getActivity(missionId: string): Promise<Activity[]>

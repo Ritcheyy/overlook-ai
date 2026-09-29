@@ -1,7 +1,16 @@
-import type { PullRequest } from '../domain'
-import type { Clock, GitHubPort } from '../ports'
+import type { PrComment, PullRequest } from '../domain'
+import type { Clock, GitHubPort, PullRequestDetail } from '../ports'
 import { systemClock } from '../ports'
 import { DEMO_LOGIN, seedPullRequests } from '../demo/seed'
+
+const DEMO_REPLY = [
+  '### Round 1 findings: disposition',
+  '',
+  '| # | Finding | Outcome |',
+  '| --- | --- | --- |',
+  '| 1 | First finding | **Fixed.** Covered by a new test. |',
+  "| 2 | Second finding | **Won't fix.** Out of scope for this PR; tracked separately. |"
+].join('\n')
 
 export interface PostedComment {
   prId: string
@@ -16,6 +25,8 @@ export interface PostedComment {
  */
 export class MockGitHub implements GitHubPort {
   readonly comments: PostedComment[] = []
+  /** Every conversation comment per PR, the app's own and simulated replies alike, oldest first. */
+  private conversation = new Map<string, PrComment[]>()
   private prs = new Map<string, PullRequest>()
   private counter = 0
   latencyMs = 0
@@ -51,11 +62,13 @@ export class MockGitHub implements GitHubPort {
     return [...this.prs.values()].filter((p) => p.state === 'open' && p.mine).map((p) => structuredClone(p))
   }
 
-  async getPullRequest(fullName: string, number: number): Promise<PullRequest> {
+  async getPullRequest(fullName: string, number: number, opts: { comments?: boolean } = {}): Promise<PullRequestDetail> {
     await this.lag()
     const p = this.prs.get(`${fullName}#${number}`)
     if (!p) throw new Error(`PR ${fullName}#${number} not found`)
-    return structuredClone(p)
+    const detail: PullRequestDetail = structuredClone(p)
+    if (opts.comments) detail.comments = structuredClone(this.conversation.get(p.id) ?? [])
+    return detail
   }
 
   async getDiff(fullName: string, number: number): Promise<string> {
@@ -73,7 +86,9 @@ export class MockGitHub implements GitHubPort {
     const prId = `${fullName}#${number}`
     if (!this.prs.has(prId)) throw new Error(`PR ${prId} not found`)
     const url = `https://github.com/${fullName}/pull/${number}#issuecomment-${++this.counter}`
-    this.comments.push({ prId, body, url, at: this.clock.now().toISOString() })
+    const at = this.clock.now().toISOString()
+    this.comments.push({ prId, body, url, at })
+    this.addComment(prId, { url, author: this.opts.login ?? DEMO_LOGIN, body, createdAt: at })
     return { url }
   }
 
@@ -90,6 +105,24 @@ export class MockGitHub implements GitHubPort {
     p.additions = (p.additions ?? 0) + 12
     p.deletions = (p.deletions ?? 0) + 3
     return structuredClone(p)
+  }
+
+  /** The PR author answers on the conversation, by default with a disposition for the numbered findings. */
+  simulateReply(prId: string, body?: string, author?: string): PrComment {
+    const p = this.must(prId)
+    const comment: PrComment = {
+      url: `https://github.com/${p.repo.fullName}/pull/${p.number}#issuecomment-${++this.counter}`,
+      author: author ?? p.author,
+      body: body ?? DEMO_REPLY,
+      createdAt: this.clock.now().toISOString()
+    }
+    this.addComment(prId, comment)
+    p.updatedAt = comment.createdAt
+    return structuredClone(comment)
+  }
+
+  private addComment(prId: string, comment: PrComment): void {
+    this.conversation.set(prId, [...(this.conversation.get(prId) ?? []), comment])
   }
 
   simulateClose(prId: string, merged: boolean): PullRequest {

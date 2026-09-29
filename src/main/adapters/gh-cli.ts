@@ -1,9 +1,9 @@
 import type { PullRequest } from '@core/domain'
 import { prIdOf } from '@core/domain'
-import type { GitHubPort } from '@core/ports'
+import type { GitHubPort, PullRequestDetail } from '@core/ports'
 import { exec as defaultExec } from './exec'
 import type { ExecFn, ExecResult } from './exec'
-import { mapDetailToPullRequest, parsePrDetail, parseSearchResults, searchItemId } from './github-map'
+import { mapDetail, mapDetailToPullRequest, parsePrDetail, parseSearchResults, searchItemId } from './github-map'
 import type { GhPrDetail, GhSearchPr } from './github-map'
 
 export type { ExecFn } from './exec'
@@ -18,7 +18,9 @@ export interface SearchFilter {
 
 export const SEARCH_FIELDS = 'number,title,repository,author,url,updatedAt,createdAt,isDraft,labels,state'
 export const DETAIL_FIELDS =
-  'number,title,body,url,author,headRefName,headRefOid,baseRefName,additions,deletions,changedFiles,state,isDraft,mergedAt,labels,createdAt,updatedAt,reviewRequests'
+  'number,title,body,url,author,headRefName,headRefOid,baseRefName,additions,deletions,changedFiles,state,isDraft,mergedAt,labels,createdAt,updatedAt,reviewRequests,reviewDecision'
+/** Watched PRs also need their conversation, to spot the author's reply. */
+export const DETAIL_WITH_COMMENTS_FIELDS = `${DETAIL_FIELDS},comments`
 const SEARCH_LIMIT = 50
 const DETAIL_CONCURRENCY = 4
 const DETAIL_CACHE_LIMIT = 500
@@ -138,10 +140,10 @@ export class GhCliGitHub implements GitHubPort {
     return this.search(['--author=@me'], false)
   }
 
-  async getPullRequest(fullName: string, number: number): Promise<PullRequest> {
-    const [me, detail] = await Promise.all([this.me(), this.fetchDetail(fullName, number)])
+  async getPullRequest(fullName: string, number: number, opts: { comments?: boolean } = {}): Promise<PullRequestDetail> {
+    const [me, detail] = await Promise.all([this.me(), this.fetchDetail(fullName, number, opts.comments)])
     this.remember(prIdOf(fullName, number), detail.updatedAt, detail)
-    return mapDetailToPullRequest(fullName, detail, { me })
+    return opts.comments ? mapDetail(fullName, detail, { me }) : mapDetailToPullRequest(fullName, detail, { me })
   }
 
   async getDiff(fullName: string, number: number): Promise<string> {
@@ -181,8 +183,8 @@ export class GhCliGitHub implements GitHubPort {
     return detail
   }
 
-  private async fetchDetail(fullName: string, number: number): Promise<GhPrDetail> {
-    const out = await this.gh(['pr', 'view', String(number), '--repo', fullName, '--json', DETAIL_FIELDS])
+  private async fetchDetail(fullName: string, number: number, comments = false): Promise<GhPrDetail> {
+    const out = await this.gh(['pr', 'view', String(number), '--repo', fullName, '--json', comments ? DETAIL_WITH_COMMENTS_FIELDS : DETAIL_FIELDS])
     return parsePrDetail(out)
   }
 

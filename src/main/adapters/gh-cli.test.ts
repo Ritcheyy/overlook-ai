@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ExecFn, ExecOptions, ExecResult } from './exec'
-import { DETAIL_FIELDS, GhCliGitHub, SEARCH_FIELDS } from './gh-cli'
+import { DETAIL_FIELDS, DETAIL_WITH_COMMENTS_FIELDS, GhCliGitHub, SEARCH_FIELDS } from './gh-cli'
 
 interface Call {
   cmd: string
@@ -205,6 +205,35 @@ describe('GhCliGitHub', () => {
     })
     const pr = await new GhCliGitHub({ exec }).getPullRequest('acme/checkout-api', 412)
     expect(pr).toMatchObject({ id: 'acme/checkout-api#412', state: 'merged', reviewRequested: true, mine: false })
+  })
+
+  it('asks for the conversation only when told to, and maps it with the review decision', async () => {
+    const { exec, calls } = fakeGh((args) => {
+      if (args[0] === 'api') return ok('octo-reviewer')
+      const { fullName, number } = repoAndNumber(args)
+      return ok(
+        JSON.stringify(
+          detail(fullName, number, 't1', {
+            reviewDecision: 'APPROVED',
+            comments: [
+              { author: { login: 'dami-codes' }, body: 'Fixed both.', createdAt: '2026-09-13T12:00:00Z', url: 'https://github.com/acme/checkout-api/pull/412#issuecomment-7', id: 'IC_1' },
+              { author: null, body: null, createdAt: '2026-09-13T12:01:00Z', url: 'https://github.com/acme/checkout-api/pull/412#issuecomment-8' }
+            ]
+          })
+        )
+      )
+    })
+    const gh = new GhCliGitHub({ exec })
+    const plain = await gh.getPullRequest('acme/checkout-api', 412)
+    expect(calls.find((c) => c.args[0] === 'pr')!.args).toEqual(['pr', 'view', '412', '--repo', 'acme/checkout-api', '--json', DETAIL_FIELDS])
+    expect(plain.comments).toBeUndefined()
+    expect(plain.reviewDecision).toBe('approved')
+    const withComments = await gh.getPullRequest('acme/checkout-api', 412, { comments: true })
+    expect(calls.filter((c) => c.args[0] === 'pr').pop()!.args).toEqual(['pr', 'view', '412', '--repo', 'acme/checkout-api', '--json', DETAIL_WITH_COMMENTS_FIELDS])
+    expect(withComments.comments).toEqual([
+      { url: 'https://github.com/acme/checkout-api/pull/412#issuecomment-7', author: 'dami-codes', body: 'Fixed both.', createdAt: '2026-09-13T12:00:00Z' },
+      { url: 'https://github.com/acme/checkout-api/pull/412#issuecomment-8', author: 'ghost', body: '', createdAt: '2026-09-13T12:01:00Z' }
+    ])
   })
 
   it('returns the diff verbatim', async () => {

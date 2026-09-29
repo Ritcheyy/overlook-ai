@@ -3,12 +3,12 @@ import { X } from 'lucide-react'
 import type { Mission, MissionState, Slot } from '@core/domain'
 import type { DemoEventKind } from '@core/ipc-contract'
 import { api } from '@/lib/api'
-import { Chip } from '@/components/ui/Chip'
 import { ConfirmButton } from '@/components/ui/ConfirmButton'
+import { NewPushChip, RepliedChip } from '@/components/app/PrMarkers'
 import { selectNeedsYouCount, selectSettings, useAppStore } from '@/state/store'
 import { chipFor, elapsedInState, formatElapsed, truncate } from './animation'
-import { hasUnreviewedPush } from './floor-selectors'
-import { useActivityLines, useDemoTarget, useFloorEmpty, useNewPushCount, useNow, useQueue, useSlotView, useSlots, useWatching } from './useFloorData'
+import { hasUnreviewedPush, hasWaitingReply } from './floor-selectors'
+import { useActivityLines, useDemoTarget, useFloorEmpty, useNow, useQueue, useSlotView, useSlots, useUpdateCount, useWatching } from './useFloorData'
 
 const RUNNING: readonly MissionState[] = ['preparing', 'reviewing', 'posting']
 
@@ -24,25 +24,18 @@ export function StateChip({ state }: { state?: MissionState }) {
   )
 }
 
-/** The amber tag every floor surface uses for a push nobody has reviewed yet. */
-export function NewPushChip({ className }: { className?: string }) {
-  return (
-    <Chip tone="amber" dot pulse className={className}>
-      new push
-    </Chip>
-  )
-}
+export { NewPushChip, RepliedChip }
 
 export function Counters() {
   const queued = useQueue().length
   const needsYou = useAppStore(selectNeedsYouCount)
   const watching = useWatching().length
-  const newPush = useNewPushCount()
+  const updates = useUpdateCount()
   const items: [string, number, string][] = [
     ['queued', queued, 'text-muted'],
     ['needs you', needsYou, needsYou > 0 ? 'text-amber' : 'text-muted'],
     ['watching', watching, watching > 0 ? 'text-teal' : 'text-muted'],
-    ['new push', newPush, newPush > 0 ? 'text-amber' : 'text-muted']
+    [updates === 1 ? 'update' : 'updates', updates, updates > 0 ? 'text-amber' : 'text-muted']
   ]
   return (
     <div className="flex items-center gap-4 font-mono text-[11px] uppercase tracking-wider">
@@ -65,7 +58,7 @@ export function FloorTitle() {
 }
 
 function ShelfRow({ mission }: { mission: Mission }) {
-  const navigate = useAppStore((s) => s.navigate)
+  const openDetails = useAppStore((s) => s.openDetails)
   const pushToast = useAppStore((s) => s.pushToast)
   const settings = useAppStore(selectSettings)
   const [busy, setBusy] = useState(false)
@@ -85,7 +78,7 @@ function ShelfRow({ mission }: { mission: Mission }) {
     <li className="flex items-center gap-1" data-queued={mission.id}>
       <button
         type="button"
-        onClick={() => navigate('triage', { missionId: mission.id })}
+        onClick={() => openDetails({ missionId: mission.id })}
         title={label}
         className="flex min-w-0 flex-1 flex-col rounded-md px-1.5 py-1 text-left hover:bg-raised"
       >
@@ -116,9 +109,9 @@ export function ShelfList() {
   const queue = useQueue()
   if (queue.length === 0) return null
   return (
-    <section aria-label="Shelf" className="pointer-events-auto w-52 rounded-lg border border-line bg-surface/85 p-1.5 shadow-lg backdrop-blur xl:w-64">
+    <section aria-label="Queued" className="pointer-events-auto w-52 rounded-lg border border-line bg-surface/85 p-1.5 shadow-lg backdrop-blur xl:w-64">
       <div className="flex items-center justify-between px-1.5 pb-1 font-mono text-[10px] uppercase tracking-wider text-muted">
-        <span>Shelf</span>
+        <span>Queued</span>
         <span className="text-faint">next up</span>
       </div>
       <ul className="flex max-h-44 flex-col gap-0.5 overflow-y-auto">
@@ -131,13 +124,13 @@ export function ShelfList() {
 }
 
 function WatchingRow({ mission }: { mission: Mission }) {
-  const navigate = useAppStore((s) => s.navigate)
+  const openDetails = useAppStore((s) => s.openDetails)
   const label = `#${mission.pr.number} ${mission.pr.title}`
   return (
     <li data-watching={mission.id}>
       <button
         type="button"
-        onClick={() => navigate('triage', { missionId: mission.id })}
+        onClick={() => openDetails({ missionId: mission.id })}
         title={label}
         className="flex w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-left hover:bg-raised"
       >
@@ -145,6 +138,7 @@ function WatchingRow({ mission }: { mission: Mission }) {
           <span className="font-mono text-muted">#{mission.pr.number}</span> {mission.pr.title}
         </span>
         {hasUnreviewedPush(mission) && <NewPushChip />}
+        {hasWaitingReply(mission) && <RepliedChip />}
       </button>
     </li>
   )
@@ -155,10 +149,10 @@ export function WatchingList() {
   const watching = useWatching()
   if (watching.length === 0) return null
   return (
-    <section aria-label="Corkboard" className="pointer-events-auto w-52 rounded-lg border border-line bg-surface/85 p-1.5 shadow-lg backdrop-blur xl:w-64">
+    <section aria-label="Watching" className="pointer-events-auto w-52 rounded-lg border border-line bg-surface/85 p-1.5 shadow-lg backdrop-blur xl:w-64">
       <div className="flex items-center justify-between px-1.5 pb-1 font-mono text-[10px] uppercase tracking-wider text-muted">
-        <span>Corkboard</span>
-        <span className="text-faint">watching</span>
+        <span>Watching</span>
+        <span className="text-faint">updates first</span>
       </div>
       <ul className="flex max-h-44 flex-col gap-0.5 overflow-y-auto">
         {watching.map((m) => (
@@ -191,6 +185,7 @@ export function DemoControls() {
   const actions: { kind: DemoEventKind; label: string; needsTarget: boolean }[] = [
     { kind: 'new_pr', label: 'New PR', needsTarget: false },
     { kind: 'push', label: `Push to ${prLabel}`, needsTarget: true },
+    { kind: 'reply', label: `Author replies on ${prLabel}`, needsTarget: true },
     { kind: 'merge', label: `Merge ${prLabel}`, needsTarget: true },
     { kind: 'fail_next_review', label: 'Fail next review', needsTarget: false }
   ]
@@ -223,7 +218,7 @@ export function DemoControls() {
               {a.label}
             </button>
           ))}
-          {!target && <div className="px-2 pt-1 text-[10px] text-faint">Push and merge need an active or watched PR.</div>}
+          {!target && <div className="px-2 pt-1 text-[10px] text-faint">Push, reply and merge need an active or watched PR.</div>}
         </div>
       )}
     </div>
@@ -234,7 +229,7 @@ export function EmptyHint() {
   const navigate = useAppStore((s) => s.navigate)
   return (
     <div className="pointer-events-auto flex flex-col items-center gap-3 rounded-xl border border-line/60 bg-bg/60 px-6 py-5 text-center backdrop-blur-sm">
-      <p className="text-sm text-muted">Send a PR from the Inbox to put someone to work</p>
+      <p className="text-sm text-muted">Start a review from the Inbox and a reviewer picks it up here</p>
       <button
         type="button"
         onClick={() => navigate('inbox')}
@@ -247,9 +242,12 @@ export function EmptyHint() {
 }
 
 function ActivityLines({ mission, count }: { mission: Mission | undefined; count: number }) {
-  const lines = useActivityLines(mission?.id, count)
+  const all = useActivityLines(mission?.id, count + 1)
   if (!mission) return null
-  if (lines.length === 0) return <div className="font-mono text-[11px] text-faint">waiting for activity…</div>
+  if (!RUNNING.includes(mission.state)) return null
+  // The card already shows the error above; the log's copy of it would repeat it.
+  const lines = all.filter((a) => !(a.kind === 'error' && a.text === mission.error)).slice(-count)
+  if (lines.length === 0) return <div className="font-mono text-[11px] text-faint">Starting…</div>
   return (
     <ul className="flex flex-col gap-0.5">
       {lines.map((a, i) => (
@@ -262,8 +260,8 @@ function ActivityLines({ mission, count }: { mission: Mission | undefined; count
 }
 
 export function SlotCard({ slot }: { slot: Slot }) {
-  const { mission, loadoutName } = useSlotView(slot)
-  const navigate = useAppStore((s) => s.navigate)
+  const { mission, loadoutName, findingCount } = useSlotView(slot)
+  const openDetails = useAppStore((s) => s.openDetails)
   const pushToast = useAppStore((s) => s.pushToast)
   const now = useNow(1000)
   const [expanded, setExpanded] = useState(false)
@@ -280,9 +278,7 @@ export function SlotCard({ slot }: { slot: Slot }) {
   const elapsed = mission ? formatElapsed(elapsedInState(mission, now)) : undefined
 
   const onOpen = () => {
-    if (!mission) return
-    if (mission.state === 'needs_you' || mission.state === 'failed') navigate('triage', { missionId: mission.id })
-    else setExpanded((v) => !v)
+    if (mission) openDetails({ missionId: mission.id })
   }
   const onCancel = async () => {
     if (!mission) return
@@ -320,9 +316,9 @@ export function SlotCard({ slot }: { slot: Slot }) {
       {mission ? (
         <>
           <div className="min-w-0">
-            <div className="truncate text-xs text-ink" title={`#${mission.pr.number} ${mission.pr.title}`}>
+            <button type="button" onClick={onOpen} className="block w-full truncate text-left text-xs text-ink hover:text-accent" title={`#${mission.pr.number} ${mission.pr.title}`}>
               <span className="font-mono text-muted">#{mission.pr.number}</span> {truncate(mission.pr.title, 72)}
-            </div>
+            </button>
             <div className="truncate text-[11px] text-faint">
               {mission.pr.repo.fullName}
               {loadoutName ? ` · ${loadoutName}` : ''}
@@ -334,6 +330,11 @@ export function SlotCard({ slot }: { slot: Slot }) {
               </div>
             )}
           </div>
+          {mission.state === 'needs_you' && (
+            <div className="text-[11px] text-amber">
+              {findingCount === 0 ? 'No findings; the summary is ready to post.' : findingCount === 1 ? '1 finding waits for your decision.' : `${findingCount} findings wait for your decision.`}
+            </div>
+          )}
           <ActivityLines mission={mission} count={expanded ? 12 : 3} />
           <div className="flex items-center gap-2 pt-0.5">
             <button
@@ -341,8 +342,13 @@ export function SlotCard({ slot }: { slot: Slot }) {
               onClick={onOpen}
               className="rounded-md border border-line bg-raised px-2.5 py-1 text-[11px] font-medium text-ink hover:border-accent/60"
             >
-              {mission.state === 'needs_you' ? 'Open triage' : mission.state === 'failed' ? 'Open' : expanded ? 'Less' : 'Open'}
+              {mission.state === 'needs_you' ? 'Open triage' : 'Open'}
             </button>
+            {running && (
+              <button type="button" onClick={() => setExpanded((v) => !v)} className="rounded-md px-2 py-1 text-[11px] text-muted hover:text-ink">
+                {expanded ? 'Less' : 'More'}
+              </button>
+            )}
             {mission.state === 'failed' && (
               <button
                 type="button"

@@ -1,6 +1,7 @@
-import { useRef, useState, type UIEvent } from 'react'
+import { useEffect, useRef, useState, type UIEvent } from 'react'
 import { Bot, Check, FolderGit2, GitBranch, Layers, Settings2, Users, X, type LucideIcon } from 'lucide-react'
-import type { EnvironmentCheck, Settings } from '@core/domain'
+import type { EnvironmentCheck, FileLinkTarget, Settings } from '@core/domain'
+import { DEFAULT_REPLY_REQUEST } from '@core/loadouts'
 import { missionHoldsSlot } from '@core/domain'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/cn'
@@ -10,14 +11,14 @@ import { Button } from '@/components/ui/Button'
 import { Select, type SelectOption } from '@/components/ui/Select'
 import { Toggle } from '@/components/ui/Toggle'
 import { useNow } from '@/components/app/useNow'
-import { Field, NumberField, SavedHint, Section, TextField, useSettingsSaver, type Save } from './fields'
+import { Field, NumberField, SavedHint, Section, TextAreaField, TextField, useSettingsSaver, type Save } from './fields'
 import { LoadoutsSection } from './LoadoutsSection'
 import { RepositoriesSection } from './RepositoriesSection'
 
 const SECTIONS: { id: string; label: string; icon: LucideIcon }[] = [
   { id: 'general', label: 'General', icon: Settings2 },
-  { id: 'characters', label: 'Characters', icon: Users },
-  { id: 'loadouts', label: 'Loadouts', icon: Layers },
+  { id: 'reviewers', label: 'Reviewers', icon: Users },
+  { id: 'review-types', label: 'Review types', icon: Layers },
   { id: 'repositories', label: 'Repositories', icon: FolderGit2 },
   { id: 'claude', label: 'Claude', icon: Bot },
   { id: 'worktrees', label: 'Worktrees', icon: GitBranch }
@@ -110,7 +111,7 @@ function GeneralSection({ settings, save, initialDemoMode }: { settings: Setting
       </Field>
       <Field
         label="Automatic follow-up rounds"
-        hint="How many times a mission re-reviews on its own after pushes before waiting for you."
+        hint="How many rounds a review may start on its own. Each needs the author's reply to the last posted round and a push; 0 leaves every follow-up to you."
         htmlFor="auto-rounds"
       >
         <NumberField
@@ -134,22 +135,34 @@ function GeneralSection({ settings, save, initialDemoMode }: { settings: Setting
       </Field>
       <Field
         label="Comment signature"
-        hint="Trailing line of every posted comment. Placeholders: {loadout}, {character}, {login}, {approval}, {round}, {sha}. Leave empty for none."
+        hint="Trailing line of every posted comment. Placeholders: {type}, {reviewer}, {login}, {approval}, {round}, {sha}. Leave empty for none."
         htmlFor="signature"
       >
-        <TextField id="signature" placeholder="e.g. {loadout} · Reviewed by {character} · {approval}" value={settings.signature} onSave={(signature) => void save({ signature })} />
+        <TextField id="signature" placeholder="e.g. {type} · Reviewed by {reviewer} · {approval}" value={settings.signature} onSave={(signature) => void save({ signature })} />
+      </Field>
+      <Field
+        label="Reply request"
+        hint="Closes comments that post findings, above a copyable table, so the author answers each numbered finding after pushing. Leave empty for none."
+        htmlFor="reply-request"
+      >
+        <TextAreaField id="reply-request" rows={3} placeholder={DEFAULT_REPLY_REQUEST} value={settings.replyRequest} onSave={(replyRequest) => void save({ replyRequest: replyRequest.trim() })} />
+        {settings.replyRequest !== DEFAULT_REPLY_REQUEST && (
+          <Button size="sm" variant="ghost" onClick={() => void save({ replyRequest: DEFAULT_REPLY_REQUEST })}>
+            Use the default
+          </Button>
+        )}
       </Field>
     </Section>
   )
 }
 
-function CharactersSection({ settings, save }: { settings: Settings; save: Save }) {
+function ReviewersSection({ settings, save }: { settings: Settings; save: Save }) {
   const update = (id: string, patch: { name?: string; color?: string }) => save({ slots: settings.slots.map((s) => (s.id === id ? { ...s, ...patch } : s)) })
   return (
-    <Section id="characters" title="Characters" description="The two reviewers on the floor. Each holds one mission at a time.">
+    <Section id="reviewers" title="Reviewers" description="The two reviewers on the floor. Each works on one review at a time; the name signs the comments it posts.">
       {settings.slots.map((slot, i) => (
-        <Field key={slot.id} label={`Desk ${i + 1}`} hint={slot.id} htmlFor={`slot-name-${slot.id}`}>
-          <label className="relative inline-flex h-7 w-7 cursor-pointer items-center justify-center overflow-hidden rounded-md border border-line" title="Character color">
+        <Field key={slot.id} label={`Reviewer ${i + 1}`} hint={slot.id} htmlFor={`slot-name-${slot.id}`}>
+          <label className="relative inline-flex h-7 w-7 cursor-pointer items-center justify-center overflow-hidden rounded-md border border-line" title="Reviewer color">
             <span className="absolute inset-1 rounded" style={{ background: slot.color }} aria-hidden />
             <input
               type="color"
@@ -252,9 +265,24 @@ function ClaudeSection({ settings, save }: { settings: Settings; save: Save }) {
   )
 }
 
+const FILE_LINK_OPTIONS: { value: FileLinkTarget; label: string }[] = [
+  { value: 'vscode', label: 'VS Code' },
+  { value: 'cursor', label: 'Cursor' },
+  { value: 'github', label: 'GitHub' }
+]
+
 function WorktreesSection({ settings, save }: { settings: Settings; save: Save }) {
   return (
-    <Section id="worktrees" title="Worktrees" description="Each mission checks the PR out into its own git worktree so your main checkout is never touched.">
+    <Section id="worktrees" title="Worktrees" description="Each review checks the PR out into its own git worktree so your main checkout is never touched.">
+      <Field label="Open finding files in" hint="Where a finding's file link goes. Editors open the file at the line in the review's worktree; GitHub is always one click away." htmlFor="file-links">
+        <Select
+          id="file-links"
+          value={settings.fileLinks}
+          onChange={(e) => void save({ fileLinks: e.target.value as FileLinkTarget })}
+          options={FILE_LINK_OPTIONS}
+          wrapperClassName="w-[160px]"
+        />
+      </Field>
       <Field
         label="Worktree root"
         hint={
@@ -272,10 +300,20 @@ function WorktreesSection({ settings, save }: { settings: Settings; save: Save }
 
 export function SettingsScreen() {
   const settings = useAppStore(selectSettings)
+  const pending = useAppStore((s) => s.settingsSection)
+  const clearSection = useAppStore((s) => s.clearSettingsSection)
   const { save, savedAt } = useSettingsSaver()
   const [active, setActive] = useState(SECTIONS[0].id)
   const scrollRef = useRef<HTMLDivElement>(null)
   const initialDemoMode = useRef(settings?.demoMode)
+
+  // Other screens send the user to a section, such as the Claude checks after a failed environment check.
+  useEffect(() => {
+    if (!pending || !settings) return
+    setActive(pending)
+    scrollRef.current?.querySelector<HTMLElement>(`#${pending}`)?.scrollIntoView?.({ block: 'start' })
+    clearSection()
+  }, [pending, settings, clearSection])
 
   const onScroll = (e: UIEvent<HTMLDivElement>) => {
     const container = e.currentTarget
@@ -325,7 +363,7 @@ export function SettingsScreen() {
         <div ref={scrollRef} onScroll={onScroll} className="relative min-h-0 flex-1 overflow-auto">
           <div className="mx-auto flex max-w-[860px] flex-col gap-8 px-5 py-5 pb-24">
             <GeneralSection settings={settings} save={save} initialDemoMode={initialDemoMode.current ?? settings.demoMode} />
-            <CharactersSection settings={settings} save={save} />
+            <ReviewersSection settings={settings} save={save} />
             <LoadoutsSection settings={settings} save={save} />
             <RepositoriesSection settings={settings} save={save} />
             <ClaudeSection settings={settings} save={save} />

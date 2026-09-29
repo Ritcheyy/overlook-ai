@@ -49,22 +49,22 @@ test('exposes a frozen bridge with invoke and on', async () => {
 })
 
 test('a bad mission id rejects in the renderer with the engine message', async () => {
-  await expect(h.page.evaluate(() => window.bridge!.invoke('postComment', 'nope'))).rejects.toThrow('Mission not found: nope')
+  await expect(h.page.evaluate(() => window.bridge!.invoke('postComment', 'nope'))).rejects.toThrow('Review not found: nope')
   for (const method of ['postComment', 'cancelMission', 'retryMission', 'rerunMission', 'closeMission', 'previewComment']) {
-    expect(await rejectionOf(method, 'nope'), method).toEqual({ isError: true, name: 'Error', message: 'Mission not found: nope' })
+    expect(await rejectionOf(method, 'nope'), method).toEqual({ isError: true, name: 'Error', message: 'Review not found: nope' })
   }
   expect(await rejectionOf('setFindingDecision', { missionId: 'nope', roundId: 'r', findingId: 'f', decision: 'approved' })).toMatchObject({
-    message: 'Mission not found: nope'
+    message: 'Review not found: nope'
   })
   expect(await rejectionOf('setFindingDecisions', { missionId: 'nope', roundId: 'r', decision: 'dropped' })).toMatchObject({
-    message: 'Mission not found: nope'
+    message: 'Review not found: nope'
   })
 })
 
 test('bad arguments reject with readable messages', async () => {
   expect(await rejectionOf('dispatch', { prId: 'nope' })).toMatchObject({ isError: true, message: 'PR not found: nope' })
   expect(await rejectionOf('dispatch', { prId: 'acme/checkout-api#9999' })).toMatchObject({ message: /^PR not found: acme\/checkout-api#9999/ })
-  expect(await rejectionOf('dispatch', { prId: 'acme/checkout-api#412', loadoutId: 'nope' })).toMatchObject({ message: 'Unknown loadout: nope' })
+  expect(await rejectionOf('dispatch', { prId: 'acme/checkout-api#412', loadoutId: 'nope' })).toMatchObject({ message: 'Unknown review type: nope' })
   expect(await rejectionOf('dispatch')).toMatchObject({ isError: true, message: expect.stringContaining('prId') })
   expect(await rejectionOf('demoSimulate', { kind: 'push' })).toMatchObject({ message: "prId is required for 'push'" })
   expect(await rejectionOf('demoSimulate', { kind: 'merge', prId: 'nope' })).toMatchObject({ message: 'PR nope not found' })
@@ -114,7 +114,7 @@ test('a dispatch that the UI would refuse still rejects with the reason', async 
   const mission = await h.page.evaluate(() => window.bridge!.invoke('dispatch', { prId: 'acme/checkout-api#419' }))
   // A free character picks the mission up before dispatch returns, so it is already preparing.
   expect(['queued', 'preparing']).toContain(mission.state)
-  expect(await rejectionOf('dispatch', { prId: 'acme/checkout-api#419' })).toMatchObject({ message: '#419 already has an active mission' })
+  expect(await rejectionOf('dispatch', { prId: 'acme/checkout-api#419' })).toMatchObject({ message: '#419 already has an active review' })
   expect(await rejectionOf('postComment', mission.id)).toMatchObject({ message: '#419 has no review round to post' })
   expect(await rejectionOf('retryMission', mission.id)).toMatchObject({ message: expect.stringMatching(/^Cannot retry from state '/) })
   expect(await rejectionOf('rerunMission', mission.id)).toMatchObject({ message: expect.stringMatching(/^Cannot rerun from state '/) })

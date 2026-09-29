@@ -1,12 +1,12 @@
 import { useRef, useState } from 'react'
 import { useFrame, type ThreeEvent } from '@react-three/fiber'
-import { ContactShadows, Edges, Float, Html, RoundedBox, Sparkles, useCursor } from '@react-three/drei'
+import { ContactShadows, Edges, Float, RoundedBox, Sparkles, useCursor } from '@react-three/drei'
 import * as THREE from 'three'
 import type { Mission } from '@core/domain'
 import { useAppStore } from '@/state/store'
 import { TOKENS, pinFor, pulseLevel } from './animation'
-import { hasUnreviewedPush } from './floor-selectors'
-import { NewPushChip } from './Hud'
+import { hasUnreviewedPush, hasWaitingReply } from './floor-selectors'
+import { NewPushChip, RepliedChip } from './Hud'
 import {
   CAMERA_POSITION,
   CAMERA_TARGET,
@@ -23,6 +23,7 @@ import {
   WINDOW_POS,
   cameraZoom
 } from './layout'
+import { FloorLabel } from './FloorLabel'
 import { Station } from './Station'
 import { useQueue, useSlots, useWatching } from './useFloorData'
 
@@ -138,7 +139,7 @@ function BackWall() {
 }
 
 function QueueCard({ mission, index }: { mission: Mission; index: number }) {
-  const navigate = useAppStore((s) => s.navigate)
+  const openDetails = useAppStore((s) => s.openDetails)
   const [hovered, setHovered] = useState(false)
   useCursor(hovered)
   const x = -0.76 + index * 0.38
@@ -154,7 +155,7 @@ function QueueCard({ mission, index }: { mission: Mission; index: number }) {
         onPointerOut={() => setHovered(false)}
         onClick={(e: ThreeEvent<MouseEvent>) => {
           e.stopPropagation()
-          navigate('triage', { missionId: mission.id })
+          openDetails({ missionId: mission.id })
         }}
       >
         <mesh>
@@ -167,11 +168,11 @@ function QueueCard({ mission, index }: { mission: Mission; index: number }) {
           <meshStandardMaterial color={TOKENS.muted} roughness={0.85} />
         </mesh>
         {hovered && (
-          <Html position={[0, 0.3, 0]} center zIndexRange={HTML_Z} pointerEvents="none">
+          <FloorLabel position={[0, 0.3, 0]} center zIndexRange={HTML_Z}>
             <div className="pointer-events-none whitespace-nowrap rounded border border-line bg-raised/90 px-1.5 py-0.5 font-mono text-[10px] text-ink">
               #{mission.pr.number} · queued
             </div>
-          </Html>
+          </FloorLabel>
         )}
       </group>
     </Float>
@@ -198,11 +199,11 @@ function Shelf() {
           <QueueCard key={m.id} mission={m} index={i} />
         ))}
         {extra > 0 && (
-          <Html position={[1.15, 0.32, 0]} center zIndexRange={HTML_Z} pointerEvents="none">
+          <FloorLabel position={[1.15, 0.32, 0]} center zIndexRange={HTML_Z}>
             <div className="pointer-events-none whitespace-nowrap rounded-full border border-line bg-raised/90 px-1.5 py-0.5 font-mono text-[10px] text-muted">
               +{extra}
             </div>
-          </Html>
+          </FloorLabel>
         )}
       </group>
     </group>
@@ -217,7 +218,7 @@ const TAG_ANCHORS: [number, string][] = [
 ]
 
 function CorkCard({ mission, index }: { mission: Mission; index: number }) {
-  const navigate = useAppStore((s) => s.navigate)
+  const openDetails = useAppStore((s) => s.openDetails)
   const [hovered, setHovered] = useState(false)
   useCursor(hovered)
   const col = index % 3
@@ -226,7 +227,9 @@ function CorkCard({ mission, index }: { mission: Mission; index: number }) {
   const y = 0.22 - row * 0.42
   const tilt = ((index * 7) % 5) * 0.02 - 0.04
   const newPush = hasUnreviewedPush(mission)
-  const pin = pinFor(newPush)
+  const replied = hasWaitingReply(mission)
+  const flagged = newPush || replied
+  const pin = pinFor(flagged)
   const pinMat = useRef<THREE.MeshStandardMaterial>(null)
   const haloMat = useRef<THREE.MeshBasicMaterial>(null)
   useFrame((state) => {
@@ -247,10 +250,10 @@ function CorkCard({ mission, index }: { mission: Mission; index: number }) {
       onPointerOut={() => setHovered(false)}
       onClick={(e: ThreeEvent<MouseEvent>) => {
         e.stopPropagation()
-        navigate('triage', { missionId: mission.id })
+        openDetails({ missionId: mission.id })
       }}
     >
-      {newPush && (
+      {flagged && (
         // Sits between the cork face and the card, so it only shows as a halo around the card's edges.
         <mesh position={[0, 0, -0.004]}>
           <planeGeometry args={[0.52, 0.4]} />
@@ -265,15 +268,19 @@ function CorkCard({ mission, index }: { mission: Mission; index: number }) {
         <sphereGeometry args={[newPush ? 0.04 : 0.03, 10, 8]} />
         <meshStandardMaterial ref={pinMat} color={pin.color} emissive={pin.color} emissiveIntensity={pin.intensity} roughness={0.4} />
       </mesh>
-      <Html position={[0, -0.03, 0.02]} center zIndexRange={HTML_Z} pointerEvents="none">
+      <FloorLabel position={[0, -0.03, 0.02]} center zIndexRange={HTML_Z}>
         <div className="pointer-events-none whitespace-nowrap font-mono text-[10px] text-bg">#{mission.pr.number}</div>
-      </Html>
-      {newPush && (
-        <Html position={[tagX, -0.21, 0.03]} zIndexRange={HTML_Z} pointerEvents="none">
+      </FloorLabel>
+      {flagged && (
+        <FloorLabel position={[tagX, -0.21, 0.03]} zIndexRange={HTML_Z}>
           <div className="pointer-events-none" style={{ transform: tagShift }}>
-            <NewPushChip className="bg-bg/90 shadow-[0_0_10px_rgba(245,181,68,0.55)]" />
+            {replied ? (
+              <RepliedChip label={`#${mission.pr.number} replied`} className="bg-bg/90 shadow-[0_0_10px_rgba(79,209,197,0.5)]" />
+            ) : (
+              <NewPushChip label={`#${mission.pr.number} new push`} className="bg-bg/90 shadow-[0_0_10px_rgba(245,181,68,0.55)]" />
+            )}
           </div>
-        </Html>
+        </FloorLabel>
       )}
     </group>
   )
@@ -281,6 +288,7 @@ function CorkCard({ mission, index }: { mission: Mission; index: number }) {
 
 function Corkboard() {
   const watching = useWatching()
+  const navigate = useAppStore((s) => s.navigate)
   const [cx, cy, cz] = CORKBOARD_POS
   const shown = watching.slice(0, MAX_CORKBOARD_CARDS)
   const extra = watching.length - shown.length
@@ -298,11 +306,16 @@ function Corkboard() {
         <CorkCard key={m.id} mission={m} index={i} />
       ))}
       {extra > 0 && (
-        <Html position={[0.75, -0.48, 0.05]} center zIndexRange={HTML_Z} pointerEvents="none">
-          <div className="pointer-events-none whitespace-nowrap rounded-full border border-line bg-raised/90 px-1.5 py-0.5 font-mono text-[10px] text-muted">
-            +{extra}
-          </div>
-        </Html>
+        <FloorLabel position={[0.62, -0.72, 0.05]} center zIndexRange={HTML_Z}>
+          <button
+            type="button"
+            onClick={() => navigate('triage', { triageFilter: 'all' })}
+            title="See every watched review in Triage"
+            className="pointer-events-auto whitespace-nowrap rounded-full border border-line bg-raised/90 px-2 py-0.5 font-mono text-[10px] text-muted hover:border-teal/60 hover:text-ink"
+          >
+            +{extra} more
+          </button>
+        </FloorLabel>
       )}
     </group>
   )

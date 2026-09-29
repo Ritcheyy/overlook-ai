@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import {
   CircleAlert,
   FlaskConical,
@@ -6,6 +6,7 @@ import {
   Inbox,
   LayoutGrid,
   ListChecks,
+  LoaderCircle,
   RefreshCw,
   ScrollText,
   Settings,
@@ -47,8 +48,12 @@ function DemoMenu() {
   const [open, setOpen] = useState(false)
   const close = useCallback(() => setOpen(false), [])
   const pushToast = useAppStore((s) => s.pushToast)
-  const selected = useAppStore((s) => (s.selectedMissionId ? s.snapshot?.missions.find((m) => m.id === s.selectedMissionId) : undefined))
-  const run = async (kind: 'push' | 'merge' | 'close' | 'new_pr' | 'fail_next_review', prId?: string) => {
+  const selected = useAppStore((s) => {
+    const missions = s.snapshot?.missions ?? []
+    const byPr = s.selectedPrId ? missions.find((m) => m.prId === s.selectedPrId && m.state !== 'closed') : undefined
+    return byPr ?? (s.selectedMissionId ? missions.find((m) => m.id === s.selectedMissionId) : undefined)
+  })
+  const run = async (kind: 'push' | 'reply' | 'merge' | 'close' | 'new_pr' | 'fail_next_review', prId?: string) => {
     close()
     try {
       await api.demoSimulate({ kind, prId })
@@ -73,9 +78,12 @@ function DemoMenu() {
       </span>
       <Dropdown open={open} onClose={close} anchorRef={anchor} align="start" width={280}>
         <div role="menu">
-          <MenuLabel>Simulate on {pr ? `#${pr.number}` : 'the selected mission'}</MenuLabel>
+          <MenuLabel>Simulate on {pr ? `#${pr.number}` : 'the selected review'}</MenuLabel>
           <MenuItem disabled={!pr} onClick={() => run('push', pr?.id)}>
             Author pushes a new commit
+          </MenuItem>
+          <MenuItem disabled={!pr} onClick={() => run('reply', pr?.id)}>
+            Author replies to the review
           </MenuItem>
           <MenuItem disabled={!pr} onClick={() => run('merge', pr?.id)}>
             Merge the pull request
@@ -92,6 +100,54 @@ function DemoMenu() {
   )
 }
 
+/**
+ * Runs the environment check once at start and shows only when something is
+ * wrong. Clicking it checks again; a failure links to the Claude settings,
+ * where each check lists what it found.
+ */
+function EnvironmentChip() {
+  const environment = useAppStore((s) => s.snapshot?.environment)
+  const navigate = useAppStore((s) => s.navigate)
+  const [checking, setChecking] = useState(false)
+  const started = useRef(false)
+  const check = useCallback(async () => {
+    setChecking(true)
+    try {
+      const result = await api.checkEnvironment()
+      return result
+    } catch {
+      return undefined
+    } finally {
+      setChecking(false)
+    }
+  }, [])
+  useEffect(() => {
+    if (started.current || environment) return
+    started.current = true
+    void check()
+  }, [environment, check])
+  if (environment?.ok && !checking) return null
+  if (!environment || checking) {
+    return (
+      <Chip tone="muted" icon={checking ? <LoaderCircle className="h-3 w-3 animate-spin" aria-hidden /> : <ShieldQuestion className="h-3 w-3" aria-hidden />} onClick={() => void check()} className="self-start" title="Checks gh, claude, git and the worktree root">
+        {checking ? 'Checking environment…' : 'Check environment'}
+      </Chip>
+    )
+  }
+  const failed = environment.items.filter((i) => !i.ok).map((i) => i.label)
+  return (
+    <Chip
+      tone="rose"
+      icon={<CircleAlert className="h-3 w-3" aria-hidden />}
+      onClick={() => navigate('settings', { section: 'claude' })}
+      className="self-start"
+      title={`${failed.join(', ')} failed. Open the Claude settings to see why.`}
+    >
+      Environment check failed
+    </Chip>
+  )
+}
+
 export function Rail() {
   const screen = useAppStore((s) => s.screen)
   const navigate = useAppStore((s) => s.navigate)
@@ -101,6 +157,8 @@ export function Rail() {
   const pollError = useAppStore((s) => s.snapshot?.pollError)
   const login = useAppStore((s) => s.snapshot?.githubLogin)
   const demo = useAppStore((s) => s.snapshot?.settings.demoMode ?? false)
+  // Until the first snapshot, demo mode is unknown; the environment check must not run on a guess.
+  const hasSnapshot = useAppStore((s) => s.snapshot !== null)
   const environment = useAppStore((s) => s.snapshot?.environment)
   const version = useAppStore((s) => s.snapshot?.version)
   const pushToast = useAppStore((s) => s.pushToast)
@@ -145,7 +203,7 @@ export function Rail() {
               <Icon className={cn('h-[15px] w-[15px]', active ? 'text-accent' : 'text-faint group-hover:text-muted')} aria-hidden />
               <span className="flex-1 text-left">{label}</span>
               {count > 0 ? (
-                <Badge count={count} tone={id === 'triage' ? 'amber' : 'accent'} aria-label={`${count} ${id === 'triage' ? 'missions need you' : 'pull requests waiting'}`} />
+                <Badge count={count} tone={id === 'triage' ? 'amber' : 'accent'} aria-label={`${count} ${id === 'triage' ? 'reviews need you' : 'pull requests waiting'}`} />
               ) : (
                 <Kbd className="opacity-0 transition-opacity group-hover:opacity-100">⌘{key}</Kbd>
               )}
@@ -173,21 +231,11 @@ export function Rail() {
             <RefreshCw className={cn(refreshing && 'animate-spin')} />
           </IconButton>
         </div>
-        {!demo && environment?.ok !== true && (
-          <Chip
-            tone={environment ? 'rose' : 'muted'}
-            icon={environment ? <CircleAlert className="h-3 w-3" aria-hidden /> : <ShieldQuestion className="h-3 w-3" aria-hidden />}
-            onClick={() => navigate('settings')}
-            className="self-start"
-            title="Open the Claude settings to check gh, claude, git and the worktree root."
-          >
-            {environment ? 'Environment check failed' : 'Run environment check'}
-          </Chip>
-        )}
+        {hasSnapshot && !demo && <EnvironmentChip />}
         <div className="flex items-center gap-2">
           <span className="flex min-w-0 flex-1 items-center gap-1.5 text-muted">
             <Github className="h-3.5 w-3.5 shrink-0 text-faint" aria-hidden />
-            <span className="truncate">{login ? `@${login}` : 'Not signed in'}</span>
+            <span className="truncate">{login ? `@${login}` : lastPollAt || pollError ? 'Not signed in' : 'Connecting to GitHub…'}</span>
           </span>
           {demo && <DemoMenu />}
         </div>

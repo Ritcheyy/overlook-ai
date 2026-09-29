@@ -14,9 +14,10 @@ Overlook runs on your machine and spends your own Claude and GitHub credentials.
 
 - **Prepare commands run branch code.** A per-repo prepare command (Settings > Repositories) runs inside the worktree with your shell, so a hostile pull request that edits `package.json` scripts could execute code if your prepare command runs an install. Only set prepare commands for repositories you trust.
 - **A pull request can edit `CLAUDE.md`.** The reviewer reads the PR branch's version, so a PR can influence its own review instructions. The read-only tool allow-list still bounds what it can do.
-- **Posted comments carry your identity.** They are posted through your `gh` login and end with the signature template from Settings, which names the character and, for auto-posted reviews, says "Posted automatically".
+- **Posted comments carry your identity.** They are posted through your `gh` login and end with the signature template from Settings, which names the reviewer and, for auto-posted reviews, says "Posted automatically".
+- **Replies are untrusted input.** Follow-up reviews are handed the PR author's replies inside a fenced block marked as claims to check, not instructions; the read-only tool allow-list applies as always. Only the PR author's comments count, and each is trimmed in size.
 - **Budget.** Every review runs under `--max-budget-usd`. On a subscription this caps work per review, not money; nothing stops you from dispatching many reviews.
-- **State on disk.** Missions, findings, briefings and posted comments are kept in `~/Library/Application Support/Overlook/state.json` in plain JSON.
+- **State on disk.** Reviews, findings, briefings, the author's replies and posted comments are kept in `~/Library/Application Support/Overlook/state.json` in plain JSON.
 
 ## Reporting a vulnerability
 

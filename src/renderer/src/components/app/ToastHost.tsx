@@ -11,11 +11,11 @@ const ICON = {
 
 function ToastItem({ toast }: { toast: Toast }) {
   const dismiss = useAppStore((s) => s.dismissToast)
-  const navigate = useAppStore((s) => s.navigate)
+  const openDetails = useAppStore((s) => s.openDetails)
   const clickable = !!toast.missionId
   const open = () => {
     if (!toast.missionId) return
-    navigate('triage', { missionId: toast.missionId })
+    openDetails({ missionId: toast.missionId })
     dismiss(toast.id)
   }
   const Body = clickable ? 'button' : 'div'
@@ -35,7 +35,7 @@ function ToastItem({ toast }: { toast: Toast }) {
       >
         <div className="truncate text-[13px] font-medium text-ink">{toast.title}</div>
         {toast.body && <div className="mt-0.5 line-clamp-3 break-words text-[12px] leading-snug text-muted">{toast.body}</div>}
-        {clickable && <div className="mt-1 text-[11px] text-accent">Open in triage</div>}
+        {clickable && <div className="mt-1 text-[11px] text-accent">Open the details</div>}
       </Body>
       <IconButton size="sm" aria-label="Dismiss notification" onClick={() => dismiss(toast.id)}>
         <X />
@@ -48,7 +48,8 @@ export function ToastHost() {
   const toasts = useAppStore((s) => s.toasts)
   if (toasts.length === 0) return null
   return (
-    <div className="pointer-events-none fixed bottom-4 right-4 z-[60] flex w-[340px] max-w-[calc(100vw-32px)] flex-col gap-2">
+    // Above the triage action bar, so a toast never covers the Post button.
+    <div className="pointer-events-none fixed bottom-16 right-4 z-[60] flex w-[340px] max-w-[calc(100vw-32px)] flex-col gap-2">
       {toasts.map((t) => (
         <ToastItem key={t.id} toast={t} />
       ))}

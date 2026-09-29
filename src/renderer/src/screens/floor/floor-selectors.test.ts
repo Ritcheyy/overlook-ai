@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Mission, MissionState } from '@core/domain'
-import { failedMissionForSlot, floorIsEmpty, hasUnreviewedPush, selectStaleMissions } from './floor-selectors'
+import { failedMissionForSlot, floorIsEmpty, hasUnreviewedPush, orderWatching, selectStaleMissions } from './floor-selectors'
 
 function mission(id: string, state: MissionState, extra: Partial<Mission> = {}): Mission {
   return {
@@ -81,3 +81,18 @@ describe('floorIsEmpty', () => {
     expect(failedMissionForSlot([mission('a', 'failed')], 'slot-1')).toBeUndefined()
   })
 })
+
+describe('orderWatching', () => {
+  it('puts pushes and replies first, then the newest activity', () => {
+    const base = { stale: false, updatedAt: '2026-09-13T10:00:00Z' }
+    const missions = [
+      { id: 'old', state: 'watching', ...base },
+      { id: 'new', state: 'watching', ...base, updatedAt: '2026-09-13T11:00:00Z' },
+      { id: 'pushed', state: 'watching', ...base, stale: true },
+      { id: 'replied', state: 'watching', ...base, authorReplies: [{ url: 'u', author: 'a', body: 'b', createdAt: 'c' }] },
+      { id: 'busy', state: 'reviewing', ...base }
+    ] as never[]
+    expect(orderWatching(missions).map((m: { id: string }) => m.id)).toEqual(['pushed', 'replied', 'new', 'old'])
+  })
+})
+

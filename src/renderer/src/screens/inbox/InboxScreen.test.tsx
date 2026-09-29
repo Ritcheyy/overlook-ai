@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { AppSnapshot, Mission } from '@core/domain'
 import { defaultSettings } from '@core/loadouts'
 import { seedPullRequests } from '@core/demo/seed'
@@ -82,17 +82,28 @@ describe('InboxScreen', () => {
     expect(other.className).not.toContain('opacity-60')
   })
 
-  it('shows a state chip for PRs with an active mission and a Review button otherwise', () => {
+  it('shows the review state for PRs under review and a Review button otherwise', () => {
     render(<InboxScreen />)
-    expect(screen.getByRole('button', { name: 'Needs you' })).toBeTruthy()
+    expect(screen.getByText('Needs you')).toBeTruthy()
     expect(screen.getAllByRole('button', { name: 'Review' })).toHaveLength(5)
   })
 
-  it('dispatches with the default loadout on Review', () => {
+  it('reviews with the default type on Review without opening the details', async () => {
     render(<InboxScreen />)
     const row = screen.getByText('feat(cart): persist promo code across sessions').closest('li')!
-    fireEvent.click(within(row).getByRole('button', { name: 'Review' }))
-    expect(api.dispatch).toHaveBeenCalledWith({ prId: 'acme/storefront-web#1203', loadoutId: 'blind', autoPost: undefined })
+    await act(async () => {
+      fireEvent.click(within(row).getByRole('button', { name: 'Review' }))
+    })
+    expect(api.dispatch).toHaveBeenCalledWith({ prId: 'acme/storefront-web#1203', loadoutId: 'blind', options: undefined })
+    expect(useAppStore.getState().screen).toBe('inbox')
+  })
+
+  it('counts everyone else\'s PRs as To review so the filters add up', () => {
+    render(<InboxScreen />)
+    const all = Number(screen.getByRole('button', { name: /^All/ }).textContent?.replace(/\D/g, ''))
+    const others = Number(screen.getByRole('button', { name: /^To review/ }).textContent?.replace(/\D/g, ''))
+    const mine = Number(screen.getByRole('button', { name: /^Mine/ }).textContent?.replace(/\D/g, ''))
+    expect(others + mine).toBe(all)
   })
 
   it('filters to my own pull requests', () => {

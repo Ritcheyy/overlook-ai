@@ -178,6 +178,21 @@ describe('GitWorktree', () => {
     await expect(fs.lstat(join(wtFor(8), 'node_modules'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
+  it('leaves a healthy worktree alone and reports the error when its checkout fails', async () => {
+    await fs.writeFile(join(wtFor(7), 'notes.txt'), 'the user left this here\n')
+    const lock = join(await git(wtFor(7), 'rev-parse', '--absolute-git-dir'), 'index.lock')
+    await fs.writeFile(lock, '')
+    try {
+      await expect(wt.prepare({ localRepoPath: local, worktreePath: wtFor(7), pr: pr(7, 'feature', sha1), linkNodeModules: false })).rejects.toThrow(
+        new RegExp(`Checking out ${sha1.slice(0, 7)} in .*pr-7 failed`)
+      )
+      expect(await fs.readFile(join(wtFor(7), 'notes.txt'), 'utf8')).toContain('the user left this here')
+      expect(await git(wtFor(7), 'rev-parse', 'HEAD')).toBe(sha2)
+    } finally {
+      await fs.rm(lock, { force: true })
+    }
+  })
+
   it('rebuilds a directory that exists but is not a registered worktree', async () => {
     await fs.mkdir(wtFor(9), { recursive: true })
     await fs.writeFile(join(wtFor(9), 'stale.txt'), 'stale')
@@ -188,7 +203,7 @@ describe('GitWorktree', () => {
     await expect(fs.stat(join(wtFor(9), 'stale.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
-  it('rebuilds a registered worktree whose checkout fails', async () => {
+  it('rebuilds a registered worktree that git no longer recognises', async () => {
     await fs.writeFile(join(wtFor(9), '.git'), 'gitdir: /nonexistent/overlook-gitdir\n')
     const activity: string[] = []
     const res = await wt.prepare({ localRepoPath: local, worktreePath: wtFor(9), pr: pr(9, 'feature', sha2), linkNodeModules: false, onActivity: (t) => activity.push(t) })

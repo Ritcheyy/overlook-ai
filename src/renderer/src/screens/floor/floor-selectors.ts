@@ -20,9 +20,26 @@ export function hasUnreviewedPush(mission: Pick<Mission, 'state' | 'stale'>): bo
   return mission.stale && (mission.state === 'watching' || mission.state === 'needs_you')
 }
 
-/** Missions the floor tags with "new push". */
+/** The author answered the posted round and nobody has looked yet. */
+export function hasWaitingReply(mission: Pick<Mission, 'state' | 'authorReplies'>): boolean {
+  return mission.state === 'watching' && (mission.authorReplies?.length ?? 0) > 0
+}
+
+/** A push or a reply nobody has reviewed: what the floor counts as an update. */
+export function hasFloorUpdate(mission: Pick<Mission, 'state' | 'stale' | 'authorReplies'>): boolean {
+  return hasUnreviewedPush(mission) || hasWaitingReply(mission)
+}
+
+/** Missions the floor counts as updates. */
 export function selectStaleMissions(missions: readonly Mission[]): Mission[] {
-  return missions.filter(hasUnreviewedPush)
+  return missions.filter(hasFloorUpdate)
+}
+
+/** Watched missions for the corkboard: updates first, so the few cards that fit show what changed, then newest activity. */
+export function orderWatching(missions: readonly Mission[]): Mission[] {
+  return missions
+    .filter((m) => m.state === 'watching')
+    .sort((a, b) => Number(hasFloorUpdate(b)) - Number(hasFloorUpdate(a)) || b.updatedAt.localeCompare(a.updatedAt))
 }
 
 /**

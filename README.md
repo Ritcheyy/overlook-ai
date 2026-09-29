@@ -4,18 +4,19 @@
 
 A macOS desktop app that reviews your GitHub pull requests with Claude Code, shows the reviewers as characters on a small 3D floor, and stops before posting so you decide what the author sees.
 
-![The floor: two characters at their desks, one waiting for triage](docs/images/floor.png)
+![The floor: two reviewers at their desks, both waiting for triage](docs/images/floor.png)
 
 ## What it does
 
-- **Inbox.** Pull requests where your review is requested (and your own, for self-review) arrive from GitHub. One click sends a PR to the floor with a chosen review style.
-- **Floor.** A character checks the PR out into an isolated git worktree and runs Claude Code on it. The character's animation is the real state: preparing, reading, thinking, writing, waiting for you, failed. Queued PRs sit on a shelf; PRs being watched for pushes hang on the corkboard.
+- **Inbox.** Pull requests where your review is requested (and your own, for self-review) arrive from GitHub, marked with the reviewer's verdict, new pushes, replies and GitHub's own approval. Click a PR to open its details; Review starts a review, and its arrow picks the review type, model, effort and budget for that run only.
+- **Floor.** A reviewer checks the PR out into an isolated git worktree and runs Claude Code on it. The character's animation is the real state: preparing, reading, thinking, writing, waiting for you, failed. Queued reviews sit on a shelf; watched ones hang on the corkboard, pushes and replies first. Everything on it opens the review's details.
+- **Details.** One screen per pull request: who opened it, from which branch, how big it is, where its review stands in one line with the action that moves it on, and a tab per round with the briefing, the verdict, the findings and what was posted. GitHub is one icon away, never the default click.
 - **Briefing.** Every review comes back with a short plain-language explanation of the PR, so you know what was done and why without reading the diff. It is for you, never posted.
-- **Triage.** Findings are cards with severity, category and a file link. Approve or drop each one (product decision, false positive, already known, not worth it), edit the summary, preview, and post one comment. Or let a repo auto-post.
-- **Follow-ups.** When the author pushes, the same character reviews only the delta. Automatic follow-ups are capped so an active author cannot burn your budget unattended.
+- **Triage.** Findings are compact rows with severity, category and a file link that opens your editor at the line. Approve or drop each one (product decision, false positive, already known, not worth it), edit the summary, preview, and post one comment. Or let a repo auto-post.
+- **Follow-ups on replies.** Posted findings are numbered and the comment asks the author to reply with a disposition for each once fixes are pushed. A follow-up round starts when that reply and a push are both in, reviews only the delta, and checks each claim in the reply against the code. A push without a reply only marks the PR; automatic follow-ups are capped, 0 by default.
 - **Workspaces.** Products split across repos are reviewed with the sibling repos in view: the reviewer can read them, check their open PRs, and use the notes you keep for the workspace. Cross-repo findings name the PR they depend on.
 
-![Triage: briefing, editable summary, findings with approve and drop](docs/images/triage.png)
+![Triage details: who and what the PR is, one status line, the briefing, an editable summary, and findings to approve or drop](docs/images/triage.png)
 
 ## How it works
 
@@ -55,10 +56,11 @@ There is no auto-updater yet; run `pnpm release` again after pulling changes. Se
 
 ## Configuration, briefly
 
-- **Loadouts** are review styles: Blind review, Security pass, Product eye, or your own. Each is a prompt appended to the review instructions. A loadout can instead send a custom message that invokes a Claude Code skill by name; see `docs/operations.md` before using that.
+- **Review types**: Blind review, Security pass, Product eye, or your own. Each is a prompt appended to the review instructions. A review type can instead send a custom message that invokes a Claude Code skill by name; see `docs/operations.md` before using that.
 - **Models.** Pick `fable`, `opus` or `sonnet` (the CLI resolves each to the latest of that family), a full model id, or the CLI default, plus a fallback model for when the main one is overloaded. Each round records what actually ran.
-- **Auto-post** per repo skips the triage stop. **Automatic follow-up rounds** (default 0) sets how many times a mission re-reviews on its own after pushes.
-- **Signature** is a template: `{loadout} · Reviewed by {character} · {approval}` by default, where `{approval}` names you or says "Posted automatically".
+- **Auto-post** per repo skips the triage stop. **Automatic follow-up rounds** (default 0) sets how many rounds a review may start on its own, each after the author's reply and a push.
+- **Signature** is a template: `{type} · Reviewed by {reviewer} · {approval}` by default, where `{approval}` names you or says "Posted automatically". The **reply request** that closes comments with findings is editable too, or empty for none.
+- **File links** in findings open VS Code or Cursor at the line in the review's worktree, or GitHub.
 - **Workspaces** are detected from a folder that holds several repos and start on when that folder has its own `CLAUDE.md`; you can also group repos by hand.
 
 ## Development

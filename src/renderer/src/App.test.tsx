@@ -81,7 +81,16 @@ const snapshot: AppSnapshot = {
 }
 
 beforeEach(() => {
-  useAppStore.setState({ snapshot: structuredClone(snapshot), loading: false, screen: 'inbox', selectedMissionId: undefined, toasts: [] })
+  useAppStore.setState({
+    snapshot: structuredClone(snapshot),
+    loading: false,
+    screen: 'inbox',
+    selectedMissionId: undefined,
+    selectedPrId: undefined,
+    triageFilter: 'all',
+    settingsSection: undefined,
+    toasts: []
+  })
   vi.clearAllMocks()
 })
 afterEach(cleanup)
@@ -92,30 +101,81 @@ describe('App shell', () => {
   it('shows the rail with counts, sync status and login', () => {
     render(<App />)
     expect(screen.getByText('Overlook')).toBeTruthy()
-    expect(screen.getByLabelText('1 missions need you')).toBeTruthy()
+    expect(screen.getByLabelText('1 reviews need you')).toBeTruthy()
     expect(screen.getByText(/^Synced/)).toBeTruthy()
     expect(screen.getByText('@ritchey')).toBeTruthy()
     expect(screen.getByText('DEMO')).toBeTruthy()
   })
 
-  it('renders the triage pane for the first needs_you mission with a stale banner and findings', async () => {
+  it('opens the details of an inbox PR on a row click, and GitHub only from its icon', async () => {
+    render(<App />)
+    const row = screen.getByText('fix(refunds): make refund creation idempotent per order').closest('li')!
+    fireEvent.click(within(row).getByRole('button', { name: 'Open #412 on GitHub' }))
+    expect(api.openExternal).toHaveBeenCalledWith(prs[0].url)
+    expect(useAppStore.getState().screen).toBe('inbox')
+    fireEvent.click(row)
+    expect(useAppStore.getState().screen).toBe('triage')
+    expect(useAppStore.getState().selectedMissionId).toBe('m-412')
+    expect(await screen.findByRole('heading', { name: prs[0].title })).toBeTruthy()
+    expect(screen.getByText(`@${prs[0].author}`)).toBeTruthy()
+    expect(screen.getByText(prs[0].headRef)).toBeTruthy()
+  })
+
+  it('opens an unreviewed PR with the review options on its status line', async () => {
+    render(<App />)
+    const pr = prs[4]
+    fireEvent.click(screen.getByText(pr.title).closest('li')!)
+    expect(useAppStore.getState().selectedPrId).toBe(pr.id)
+    const status = await screen.findByRole('status')
+    expect(status.textContent).toContain('Not reviewed yet.')
+    fireEvent.click(within(status).getByRole('button', { name: 'Review options' }))
+    const form = screen.getByRole('dialog', { name: 'Review options' })
+    fireEvent.change(within(form).getByLabelText('Model'), { target: { value: 'sonnet' } })
+    fireEvent.change(within(form).getByLabelText('Budget in dollars'), { target: { value: '2' } })
+    await act(async () => {
+      fireEvent.click(within(form).getByRole('button', { name: 'Start review' }))
+    })
+    expect(api.dispatch).toHaveBeenCalledWith({ prId: pr.id, loadoutId: 'blind', options: { model: 'sonnet', maxBudgetUsd: 2 } })
+  })
+
+  it('shows the triage round for the first needs_you review with the new push on its status line', async () => {
     render(<App />)
     nav('Triage')
-    expect(await screen.findByText(/The author pushed/)).toBeTruthy()
+    const status = await screen.findByRole('status')
+    expect(status.textContent).toContain(`${prs[0].author} pushed a1b2c3d after this round`)
+    expect(within(status).getByRole('button', { name: 'Review the delta' })).toBeTruthy()
     const findings = screen.getByRole('list', { name: 'Findings' })
     expect(within(findings).getAllByRole('listitem')).toHaveLength(4)
     fireEvent.click(within(findings).getAllByRole('button', { name: 'Drop' })[0])
     expect(api.setFindingDecision).toHaveBeenCalledWith(expect.objectContaining({ missionId: 'm-412', findingId: 'f0', decision: 'dropped' }))
     fireEvent.click(screen.getByRole('button', { name: 'Approve blockers & majors' }))
-    expect(api.setFindingDecisions).toHaveBeenCalledWith({ missionId: 'm-412', roundId: 'acme/checkout-api#412-r1', decision: 'approved', findingIds: ['f0', 'f1'] })
+    expect(api.setFindingDecisions).toHaveBeenCalledWith({ missionId: 'm-412', roundId: 'acme/checkout-api#412-r1', decision: 'approved', findingIds: ['f0', 'f1'], dropReason: undefined })
     expect(screen.getByRole('button', { name: /Post to GitHub/ }).hasAttribute('disabled')).toBe(true)
+  })
+
+  it('keeps finding bodies folded until asked, and opens files in the editor', async () => {
+    const snap = structuredClone(snapshot)
+    snap.missions[0].worktreePath = '/Users/demo/.overlook/worktrees/acme/checkout-api/pr-412'
+    useAppStore.setState({ snapshot: snap })
+    render(<App />)
+    nav('Triage')
+    const findings = await screen.findByRole('list', { name: 'Findings' })
+    const first = snap.missions[0].rounds[0].findings[0]
+    const toggle = within(findings).getByRole('button', { name: new RegExp(first.title.slice(0, 20).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')) })
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(document.getElementById('finding-body-f0')).toBeNull()
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(document.getElementById('finding-body-f0')).toBeTruthy()
+    fireEvent.click(within(findings).getAllByRole('button', { name: /in VS Code$/ })[0])
+    expect(api.openExternal).toHaveBeenCalledWith(`vscode://file/Users/demo/.overlook/worktrees/acme/checkout-api/pr-412/${first.file}:${first.line}`)
   })
 
   it('drops the remaining nits in one bulk call that carries the reason', async () => {
     render(<App />)
     nav('Triage')
     await screen.findByRole('list', { name: 'Findings' })
-    fireEvent.click(screen.getByRole('button', { name: 'Drop all remaining nits' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Drop remaining nits' }))
     expect(api.setFindingDecisions).toHaveBeenCalledWith({
       missionId: 'm-412',
       roundId: 'acme/checkout-api#412-r1',
@@ -140,57 +200,80 @@ describe('App shell', () => {
     expect(await screen.findByText('Posted to #412')).toBeTruthy()
   })
 
-  it('shows failed, watching and in-progress panes', async () => {
+  it('shows failed, watching and running reviews, and keeps closed ones out of the list', async () => {
+    const snap = structuredClone(snapshot)
+    snap.missions.push({ ...snap.missions[2], id: 'm-closed', prId: 'x#1', state: 'closed', pr: { ...snap.missions[2].pr, id: 'x#1', number: 1, title: 'An old closed one' } })
+    useAppStore.setState({ snapshot: snap })
     render(<App />)
     nav('Triage')
-    fireEvent.click(await screen.findByRole('button', { name: /#1203/ }))
-    expect(screen.getByText('The mission failed')).toBeTruthy()
+    const list = await screen.findByRole('navigation', { name: 'Reviews' })
+    expect(within(list).queryByText('An old closed one')).toBeNull()
+    fireEvent.click(within(list).getByRole('button', { name: /#1203/ }))
+    expect(screen.getByRole('status').textContent).toContain('The review failed: git fetch failed: could not read from remote')
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
     expect(api.retryMission).toHaveBeenCalledWith('m-1203')
-    fireEvent.click(screen.getByRole('button', { name: /^Recent/ }))
-    fireEvent.click(screen.getByRole('button', { name: /#77/ }))
-    expect(screen.getByText(/Watching for pushes/)).toBeTruthy()
-    expect(screen.getByText('Posted')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: /#58/ }))
+    fireEvent.click(within(list).getByRole('button', { name: /#77/ }))
+    expect(screen.getByRole('status').textContent).toContain(`Watching for ${prs[2].author}'s reply.`)
+    expect(screen.getByText('Posted comment')).toBeTruthy()
+    fireEvent.click(within(list).getByRole('button', { name: /#58/ }))
     expect(screen.getByRole('log')).toBeTruthy()
   })
 
-  it('lists every mission in the log and opens a drawer for non-triage states', () => {
+  it('filters the list to reviews with updates and searches it', async () => {
+    const snap = structuredClone(snapshot)
+    snap.missions[2].authorReplies = [{ url: 'https://github.com/acme/mobile-app/pull/77#issuecomment-10', author: prs[2].author, body: 'Fixed both.', createdAt: at }]
+    useAppStore.setState({ snapshot: snap })
+    render(<App />)
+    nav('Triage')
+    const list = await screen.findByRole('navigation', { name: 'Reviews' })
+    fireEvent.click(screen.getByRole('button', { name: /^Updates/ }))
+    expect(within(list).getAllByRole('button').map((b) => b.textContent?.match(/#\d+/)?.[0])).toEqual(['#412', '#77'])
+    expect(within(list).getByText('replied')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /^All/ }))
+    fireEvent.change(screen.getByLabelText('Search reviews'), { target: { value: 'webhook' } })
+    expect(within(list).getAllByRole('button')).toHaveLength(1)
+  })
+
+  it('opens the side panel for every Log row, sorted by latest activity', () => {
+    const snap = structuredClone(snapshot)
+    snap.missions[3].updatedAt = new Date(NOW.getTime() + 60_000).toISOString()
+    useAppStore.setState({ snapshot: snap })
     render(<App />)
     nav('Log')
     const table = screen.getByRole('table')
-    expect(within(table).getAllByRole('row')).toHaveLength(5)
+    const rows = within(table).getAllByRole('row')
+    expect(rows).toHaveLength(5)
+    expect(rows[1].textContent).toContain('#58')
     expect(within(table).getByText('$0.42')).toBeTruthy()
-    fireEvent.click(within(table).getByText('feat: retry webhook deliveries with exponential backoff').closest('tr')!)
-    expect(screen.getByRole('complementary', { name: 'Mission details' })).toBeTruthy()
     fireEvent.click(within(table).getByText('fix(refunds): make refund creation idempotent per order').closest('tr')!)
+    expect(useAppStore.getState().screen).toBe('log')
+    const panel = screen.getByRole('complementary', { name: 'Review details' })
+    fireEvent.click(within(panel).getByRole('button', { name: 'Open in Triage' }))
     expect(useAppStore.getState().screen).toBe('triage')
     expect(useAppStore.getState().selectedMissionId).toBe('m-412')
   })
 
   it('shows which model and effort each round ran with in triage and the log', async () => {
     const snap = structuredClone(snapshot)
-    Object.assign(snap.missions[0].rounds[0], { model: 'claude-opus-4-1', effort: 'high', costUsd: 0.12 })
+    Object.assign(snap.missions[0].rounds[0], { model: 'claude-opus-4-1', effort: 'high', costUsd: 0.12, budgetUsd: 15 })
     Object.assign(snap.missions[3].rounds[0], { model: 'opus', effort: 'default' })
     useAppStore.setState({ snapshot: snap })
     render(<App />)
     nav('Triage')
-    expect(await screen.findByText('claude-opus-4-1')).toBeTruthy()
-    expect(screen.getByText('effort high')).toBeTruthy()
-    expect(screen.getByText('Cost $0.12 · took 42s · claude-opus-4-1 (effort high)')).toBeTruthy()
+    expect(await screen.findByText('Cost $0.12 · took 42s · claude-opus-4-1 (effort high) · budget $15.00')).toBeTruthy()
     nav('Log')
     const table = screen.getByRole('table')
     expect(within(table).getByRole('columnheader', { name: 'Model' })).toBeTruthy()
     expect(within(table).getByText('claude-opus-4-1')).toBeTruthy()
     expect(within(table).getByText('opus')).toBeTruthy()
     fireEvent.click(within(table).getByText('feat: retry webhook deliveries with exponential backoff').closest('tr')!)
-    const rounds = within(screen.getByRole('complementary', { name: 'Mission details' })).getByRole('list', { name: 'Rounds' })
+    const rounds = within(screen.getByRole('complementary', { name: 'Review details' })).getByRole('list', { name: 'Rounds' })
     expect(rounds.textContent).toContain('Round 1')
     expect(rounds.textContent).toContain('opus')
     expect(rounds.textContent).toContain('effort default')
   })
 
-  it('saves settings on change', async () => {
+  it('saves settings on change and says so beside the field', async () => {
     render(<App />)
     nav('Settings')
     fireEvent.click(screen.getByRole('switch', { name: 'Notifications' }))
@@ -203,10 +286,14 @@ describe('App shell', () => {
     fireEvent.change(rounds, { target: { value: '1.6' } })
     fireEvent.blur(rounds)
     expect(api.updateSettings).toHaveBeenCalledWith({ maxAutoRoundsPerMission: 2 })
-    expect(await screen.findByText('Saved')).toBeTruthy()
+    expect((await screen.findAllByText('Saved')).length).toBeGreaterThan(0)
+    fireEvent.change(poll, { target: { value: '5' } })
+    fireEvent.blur(poll)
+    expect(api.updateSettings).toHaveBeenLastCalledWith({ pollIntervalSec: 15 })
+    expect(screen.getByText('Set to 15, the minimum')).toBeTruthy()
   })
 
-  it('saves a loadout message and clears it again on reset', async () => {
+  it('saves a review type message and clears it again on reset', async () => {
     const snap = structuredClone(snapshot)
     snap.settings.loadouts = snap.settings.loadouts.map((l) => (l.id === 'blind' ? { ...l, slashCommand: SKILL_MESSAGE_EXAMPLE } : l))
     useAppStore.setState({ snapshot: snap })
@@ -240,7 +327,7 @@ describe('App shell', () => {
     useAppStore.setState({ snapshot: snap })
     render(<App />)
     nav('Triage')
-    const box = (await screen.findByLabelText('Summary')) as HTMLTextAreaElement
+    const box = (await screen.findByRole('textbox', { name: 'Summary' })) as HTMLTextAreaElement
     expect(box.value).toBe(r.summary)
     fireEvent.change(box, { target: { value: 'Tighter summary.' } })
     fireEvent.blur(box)
@@ -263,25 +350,29 @@ describe('App shell', () => {
     render(<App />)
     nav('Triage')
     expect(await screen.findByText(snap.missions[0].rounds[0].summary)).toBeTruthy()
-    expect(screen.queryByLabelText('Summary')).toBeNull()
+    expect(screen.queryByRole('textbox', { name: 'Summary' })).toBeNull()
   })
 
-  it('toggles auto follow-up and re-runs with a chosen loadout while watching', async () => {
+  it('toggles automatic follow-ups and re-runs with a chosen review type while watching', async () => {
     const snap = structuredClone(snapshot)
     snap.missions[2].worktreePath = '/Users/demo/.overlook/worktrees/acme/mobile-app/pr-77'
     snap.settings.maxAutoRoundsPerMission = 3
-    useAppStore.setState({ snapshot: snap })
+    useAppStore.setState({ snapshot: snap, selectedMissionId: 'm-77' })
     render(<App />)
     nav('Triage')
-    fireEvent.click(await screen.findByRole('button', { name: /^Recent/ }))
-    fireEvent.click(screen.getByRole('button', { name: /#77/ }))
-    expect(screen.getByText('0 of 3 automatic rounds used · $0.42 spent across 1 round')).toBeTruthy()
-    fireEvent.click(screen.getByRole('switch', { name: 'Re-review automatically when the author pushes' }))
+    expect(await screen.findByText("0 of 3 used. Each needs the author's reply and a push.")).toBeTruthy()
+    fireEvent.click(screen.getByRole('switch', { name: 'Automatic follow-ups for this review' }))
     expect(api.setAutoFollowUp).toHaveBeenCalledWith({ missionId: 'm-77', enabled: false })
-    fireEvent.change(screen.getByRole('combobox', { name: 'Loadout for the next round' }), { target: { value: 'security' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Re-run' }))
-    expect(api.rerunMission).toHaveBeenCalledWith('m-77', 'security')
-    fireEvent.click(screen.getByRole('button', { name: 'Open worktree' }))
+    const status = screen.getByRole('status')
+    fireEvent.click(within(status).getByRole('button', { name: 'Review options' }))
+    const form = screen.getByRole('dialog', { name: 'Review options' })
+    fireEvent.change(within(form).getByLabelText('Review type'), { target: { value: 'security' } })
+    await act(async () => {
+      fireEvent.click(within(form).getByRole('button', { name: 'Start review' }))
+    })
+    expect(api.rerunMission).toHaveBeenCalledWith('m-77', 'security', undefined)
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /Open worktree/ }))
     expect(api.openPath).toHaveBeenCalledWith('/Users/demo/.overlook/worktrees/acme/mobile-app/pr-77')
   })
 
@@ -309,9 +400,17 @@ describe('App shell', () => {
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Check environment' }))
     })
-    expect(api.checkEnvironment).toHaveBeenCalled()
-    act(() => useAppStore.setState({ snapshot: { ...snap, environment: undefined } }))
-    expect(screen.getByRole('button', { name: 'Run environment check' })).toBeTruthy()
+    expect(api.checkEnvironment).toHaveBeenCalledTimes(1)
+  })
+
+  it('runs the environment check by itself when it has never run', async () => {
+    const snap = structuredClone(snapshot)
+    snap.settings.demoMode = false
+    useAppStore.setState({ snapshot: snap })
+    await act(async () => {
+      render(<App />)
+    })
+    expect(api.checkEnvironment).toHaveBeenCalledTimes(1)
   })
 
   it('offers a restart after toggling demo mode, gated on running reviews', () => {
@@ -327,13 +426,13 @@ describe('App shell', () => {
     expect(api.relaunch).toHaveBeenCalled()
   })
 
-  it('surfaces a posting failure on the needs_you pane', async () => {
+  it('surfaces a posting failure on the status line', async () => {
     const snap = structuredClone(snapshot)
     snap.missions[0].error = 'Posting failed: GitHub API: 502 Bad Gateway'
     useAppStore.setState({ snapshot: snap })
     render(<App />)
     nav('Triage')
-    expect(await screen.findByText('Posting failed: GitHub API: 502 Bad Gateway')).toBeTruthy()
+    expect((await screen.findByRole('status')).textContent).toContain('Posting failed: GitHub API: 502 Bad Gateway')
   })
 
   it('keeps Enter on a control inside a log row from opening the row', () => {
@@ -341,14 +440,13 @@ describe('App shell', () => {
     nav('Log')
     const button = screen.getByRole('button', { name: 'Open posted comment' })
     fireEvent.keyDown(button, { key: 'Enter' })
-    expect(useAppStore.getState().screen).toBe('log')
-    expect(screen.queryByRole('complementary', { name: 'Mission details' })).toBeNull()
+    expect(screen.queryByRole('complementary', { name: 'Review details' })).toBeNull()
     fireEvent.keyDown(button.closest('tr')!, { key: 'Enter' })
-    expect(useAppStore.getState().screen).toBe('triage')
+    expect(screen.getByRole('complementary', { name: 'Review details' })).toBeTruthy()
     expect(useAppStore.getState().selectedMissionId).toBe('m-77')
   })
 
-  it('reports a failed worktree removal on a closed mission', async () => {
+  it('reports a failed worktree removal on a closed review', async () => {
     const snap = structuredClone(snapshot)
     const closed = snap.missions[2]
     closed.state = 'closed'
@@ -359,19 +457,7 @@ describe('App shell', () => {
     render(<App />)
     nav('Triage')
     expect(await screen.findByText('Worktree removal failed: fatal: worktree is locked')).toBeTruthy()
-    expect(screen.queryByText(/has been removed/)).toBeNull()
-  })
-
-  it('lets Recent collapse again after selecting a mission inside it', async () => {
-    render(<App />)
-    nav('Triage')
-    const recent = await screen.findByRole('button', { name: /^Recent/ })
-    fireEvent.click(recent)
-    fireEvent.click(screen.getByRole('button', { name: /#77/ }))
-    expect(screen.getByText(/Watching for pushes/)).toBeTruthy()
-    fireEvent.click(recent)
-    expect(recent.getAttribute('aria-expanded')).toBe('false')
-    expect(screen.queryByRole('button', { name: /#77/ })).toBeNull()
+    expect(screen.getByRole('status').textContent).toContain('This review is closed (PR merged).')
   })
 
   it('offers repos known only through a path override for auto-post', () => {
@@ -382,4 +468,51 @@ describe('App shell', () => {
     nav('Settings')
     expect(screen.getByRole('checkbox', { name: 'acme/legacy-api' })).toBeTruthy()
   })
+
+  it('leaves switched-off repos out of the auto-post list', () => {
+    const snap = structuredClone(snapshot)
+    snap.settings.repoPaths = { 'acme/legacy-api': '/Users/demo/Projects/legacy-api' }
+    snap.settings.inactiveRepos = ['acme/legacy-api']
+    useAppStore.setState({ snapshot: snap })
+    render(<App />)
+    nav('Settings')
+    expect(screen.queryByRole('checkbox', { name: 'acme/legacy-api' })).toBeNull()
+  })
+
+  it('retries a failed review as it was, or starts over with other options', async () => {
+    useAppStore.setState({ selectedMissionId: 'm-1203' })
+    render(<App />)
+    nav('Triage')
+    const status = await screen.findByRole('status')
+    await act(async () => {
+      fireEvent.click(within(status).getByRole('button', { name: 'Retry' }))
+    })
+    expect(api.retryMission).toHaveBeenCalledWith('m-1203')
+    fireEvent.click(within(status).getByRole('button', { name: 'Review options' }))
+    const form = screen.getByRole('dialog', { name: 'Review options' })
+    fireEvent.change(within(form).getByLabelText('Budget in dollars'), { target: { value: '8' } })
+    await act(async () => {
+      fireEvent.click(within(form).getByRole('button', { name: 'Start review' }))
+    })
+    expect(api.rerunMission).toHaveBeenCalledWith('m-1203', 'blind', { maxBudgetUsd: 8 })
+  })
+
+  it('shows the whole error of a review that failed before its round started', async () => {
+    const snap = structuredClone(snapshot)
+    Object.assign(snap.missions[1], { rounds: [], error: 'Checking out a1b2c3d failed (exit 128):\nfatal: Unable to create index.lock' })
+    useAppStore.setState({ snapshot: snap, selectedMissionId: 'm-1203' })
+    render(<App />)
+    nav('Triage')
+    expect((await screen.findByRole('alert')).textContent).toContain('fatal: Unable to create index.lock')
+    expect(screen.queryByText('Starting…')).toBeNull()
+  })
+
+  it('does not run the environment check before it knows whether demo mode is on', async () => {
+    useAppStore.setState({ snapshot: null, loading: true })
+    await act(async () => {
+      render(<App />)
+    })
+    expect(api.checkEnvironment).not.toHaveBeenCalled()
+  })
 })
+
