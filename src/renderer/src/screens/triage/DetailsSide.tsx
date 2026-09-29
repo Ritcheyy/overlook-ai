@@ -1,7 +1,8 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { Folder } from 'lucide-react'
-import type { Mission, PullRequest, Settings, Slot } from '@core/domain'
+import type { Mission, PullRequest, ReviewRound, Settings, Slot } from '@core/domain'
 import { autoRoundsUsed } from '@core/domain'
+import { applyRunOptions } from '@core/engine/run-options'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/cn'
 import { formatUsd } from '@/lib/format'
@@ -22,7 +23,37 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-function ReviewFacts({ mission, settings, slots }: { mission: Mission; settings: Settings; slots: Slot[] }) {
+/** The model behind the round on screen; before the first round, what the run will ask the CLI for. */
+function ModelFact({ mission, round, settings }: { mission: Mission; round?: ReviewRound; settings: Settings }) {
+  let model = round?.model
+  let effort = round?.effort
+  if (!round) {
+    const next = applyRunOptions(settings, mission.runOptions)
+    model = next.claudeModel || 'default'
+    effort = next.claudeEffort ?? 'default'
+  }
+  if (!model) return null
+  const older = !!round && round.id !== mission.rounds[mission.rounds.length - 1]?.id
+  return (
+    <Fact label="Model">
+      <span className="break-words">{model}</span>
+      {effort && (
+        <>
+          {' '}
+          <span className="whitespace-nowrap text-faint">· effort {effort}</span>
+        </>
+      )}
+      {older && (
+        <>
+          {' '}
+          <span className="whitespace-nowrap text-faint">· round {round.index}</span>
+        </>
+      )}
+    </Fact>
+  )
+}
+
+function ReviewFacts({ mission, round, settings, slots }: { mission: Mission; round?: ReviewRound; settings: Settings; slots: Slot[] }) {
   const actions = useMissionActions()
   const slot = slotFor(mission, slots)
   const loadout = settings.loadouts.find((l) => l.id === mission.loadoutId)
@@ -45,6 +76,7 @@ function ReviewFacts({ mission, settings, slots }: { mission: Mission; settings:
           )}
         </Fact>
         <Fact label="Review type">{loadout?.name ?? mission.loadoutId}</Fact>
+        <ModelFact mission={mission} round={round} settings={settings} />
         <Fact label="Rounds">
           {mission.rounds.length}
           {cost !== undefined && <span className="text-faint"> · {formatUsd(cost)} in total</span>}
@@ -121,16 +153,18 @@ function Description({ pr }: { pr: PullRequest }) {
 export interface DetailsSideProps {
   pr: PullRequest
   mission?: Mission
+  /** The round the tabs show. */
+  round?: ReviewRound
   settings: Settings
   slots: Slot[]
   now: number
 }
 
 /** Facts about the review, the PR's own description and the history, beside the round. */
-export function DetailsSide({ pr, mission, settings, slots, now }: DetailsSideProps) {
+export function DetailsSide({ pr, mission, round, settings, slots, now }: DetailsSideProps) {
   return (
     <aside className="flex min-w-0 flex-col gap-3" aria-label="Details">
-      {mission && <ReviewFacts mission={mission} settings={settings} slots={slots} />}
+      {mission && <ReviewFacts mission={mission} round={round} settings={settings} slots={slots} />}
       <Description pr={pr} />
       {mission && mission.timeline.length > 0 && (
         <Card aria-label="History">

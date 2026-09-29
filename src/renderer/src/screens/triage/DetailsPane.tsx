@@ -277,7 +277,7 @@ export function DetailsPane({ pr, mission }: DetailsPaneProps) {
             {rounds.length > 1 && <RoundTabs rounds={rounds} selectedId={round?.id} runningId={runningId} onSelect={setRoundId} />}
             {content}
           </div>
-          <DetailsSide pr={pr} mission={mission} settings={settings} slots={slots} now={now} />
+          <DetailsSide pr={pr} mission={mission} round={round} settings={settings} slots={slots} now={now} />
         </div>
       </div>
       {mission && triageRound && inTriage && (

@@ -345,13 +345,24 @@ describe('ClaudeCliRunner', () => {
     expect(result.model).toBe('claude-x')
   })
 
+  it('reports the init event model once, as soon as it arrives', async () => {
+    const order: string[] = []
+    const { spawn } = fakeSpawn(successScript)
+    const { req } = request({ onActivity: (a) => order.push(a.text), onModel: (m) => order.push(`model ${m}`) })
+    await makeRunner({ spawn }).review(req)
+    expect(order.slice(0, 3)).toEqual(['Starting Claude Code', 'model claude-x', 'Let me start by reading the diff and then the service.'])
+    expect(order.filter((t) => t.startsWith('model '))).toEqual(['model claude-x'])
+  })
+
   it('falls back to the model the result names when the init event has none', async () => {
+    const reported: string[] = []
     const { spawn } = fakeSpawn((child) => {
       child.stdout.write(line({ type: 'system', subtype: 'init' }))
       child.stdout.write(resultLine({ model: 'claude-y' }))
       child.exit(0)
     })
-    expect((await makeRunner({ spawn }).review(request().req)).model).toBe('claude-y')
+    expect((await makeRunner({ spawn }).review(request({ onModel: (m) => reported.push(m) }).req)).model).toBe('claude-y')
+    expect(reported).toEqual([])
   })
 
   it('reads the model that carried the spend off modelUsage, and leaves it unset when nothing names one', async () => {

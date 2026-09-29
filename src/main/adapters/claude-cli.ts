@@ -337,7 +337,10 @@ export class ClaudeCliRunner implements RunnerPort {
           if (resolved && 'ok' in outcome) outcome.ok.model = resolved
           return
         }
-        model ??= initModel(event)
+        if (model === undefined) {
+          model = initModel(event)
+          if (model) req.onModel?.(model)
+        }
         reported = findingsToolInput(event) ?? reported
         for (const a of activitiesFromEvent(event, req.worktreePath)) emit(a)
       }
