@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type UIEvent } from 'react'
 import { Bot, Check, FolderGit2, GitBranch, Layers, Settings2, Users, X, type LucideIcon } from 'lucide-react'
-import type { EnvironmentCheck, FileLinkTarget, Settings } from '@core/domain'
+import type { EnvironmentCheck, FileLinkTarget, ReviewerEngine, Settings } from '@core/domain'
 import { DEFAULT_REPLY_REQUEST } from '@core/loadouts'
-import { missionHoldsSlot } from '@core/domain'
+import { REVIEWER_ENGINES, REVIEWER_ENGINE_LABELS, missionHoldsSlot } from '@core/domain'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/cn'
 import { relativeTime } from '@/lib/format'
@@ -20,7 +20,7 @@ const SECTIONS: { id: string; label: string; icon: LucideIcon }[] = [
   { id: 'reviewers', label: 'Reviewers', icon: Users },
   { id: 'review-types', label: 'Review types', icon: Layers },
   { id: 'repositories', label: 'Repositories', icon: FolderGit2 },
-  { id: 'claude', label: 'Claude', icon: Bot },
+  { id: 'engine', label: 'Engine', icon: Bot },
   { id: 'worktrees', label: 'Worktrees', icon: GitBranch }
 ]
 
@@ -41,6 +41,7 @@ const MODEL_ALIASES: SelectOption[] = [
 ]
 const CUSTOM_MODEL = 'custom'
 const MODEL_OPTIONS: SelectOption[] = [...MODEL_ALIASES, { value: CUSTOM_MODEL, label: 'Custom model id…' }]
+const ENGINE_OPTIONS: SelectOption[] = REVIEWER_ENGINES.map((value) => ({ value, label: REVIEWER_ENGINE_LABELS[value] }))
 const FALLBACK_OPTIONS: SelectOption[] = [{ value: '', label: 'None' }, ...MODEL_ALIASES.slice(1)]
 
 const isModelAlias = (value: string) => MODEL_ALIASES.some((o) => o.value === value)
@@ -180,7 +181,7 @@ function ReviewersSection({ settings, save }: { settings: Settings; save: Save }
   )
 }
 
-function EnvironmentField() {
+function EnvironmentField({ engine }: { engine: ReviewerEngine }) {
   const pushToast = useAppStore((s) => s.pushToast)
   const cached = useAppStore((s) => s.snapshot?.environment)
   const [result, setResult] = useState<EnvironmentCheck | undefined>()
@@ -199,7 +200,7 @@ function EnvironmentField() {
     }
   }
   return (
-    <Field label="Environment" hint="gh login, the claude binary, git, and a writable worktree root.">
+    <Field label="Environment" hint={`gh login, the ${engine === 'cursor' ? 'agent binary and its login' : 'claude binary'}, git, and a writable worktree root.`}>
       <div className="flex w-full flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <Button size="sm" variant="secondary" loading={checking} onClick={() => void check()}>
@@ -231,9 +232,35 @@ function EnvironmentField() {
   )
 }
 
-function ClaudeSection({ settings, save }: { settings: Settings; save: Save }) {
+function EngineSection({ settings, save }: { settings: Settings; save: Save }) {
+  const engine = settings.reviewerEngine
   return (
-    <Section id="claude" title="Claude" description="How the Claude Code CLI is invoked for real reviews. Unused in demo mode.">
+    <Section id="engine" title="Review engine" description="Which CLI runs real reviews, on your own account, and how it is invoked. Unused in demo mode.">
+      <Field label="Engine" hint="Switching takes effect from the next review." htmlFor="reviewer-engine">
+        <Select id="reviewer-engine" value={engine} onChange={(e) => void save({ reviewerEngine: e.target.value as ReviewerEngine })} options={ENGINE_OPTIONS} wrapperClassName="w-[200px]" />
+      </Field>
+      {engine === 'cursor' ? <CursorFields settings={settings} save={save} /> : <ClaudeFields settings={settings} save={save} />}
+      <EnvironmentField engine={engine} />
+    </Section>
+  )
+}
+
+function CursorFields({ settings, save }: { settings: Settings; save: Save }) {
+  return (
+    <>
+      <Field label="CLI path" hint="Executable name or absolute path of the Cursor CLI, installed with: curl https://cursor.com/install -fsS | bash" htmlFor="cursor-path">
+        <TextField id="cursor-path" mono value={settings.cursorPath} onSave={(cursorPath) => void save({ cursorPath: cursorPath.trim() || 'agent' })} wrapperClassName="w-[320px]" />
+      </Field>
+      <Field label="Model" hint="A name from `agent models`. Empty uses Cursor's Auto choice. Cursor reports no cost, so no budget applies." htmlFor="cursor-model">
+        <TextField id="cursor-model" mono placeholder="auto" value={settings.cursorModel} onSave={(cursorModel) => void save({ cursorModel: cursorModel.trim() })} wrapperClassName="w-[260px]" />
+      </Field>
+    </>
+  )
+}
+
+function ClaudeFields({ settings, save }: { settings: Settings; save: Save }) {
+  return (
+    <>
       <Field label="CLI path" hint="Executable name or absolute path." htmlFor="claude-path">
         <TextField id="claude-path" mono value={settings.claudePath} onSave={(claudePath) => void save({ claudePath: claudePath.trim() || 'claude' })} wrapperClassName="w-[320px]" />
       </Field>
@@ -260,8 +287,7 @@ function ClaudeSection({ settings, save }: { settings: Settings; save: Save }) {
         <span className="text-[12px] text-faint">$</span>
         <NumberField id="claude-budget" min={0} step={0.5} value={settings.maxBudgetUsdPerReview} onSave={(maxBudgetUsdPerReview) => void save({ maxBudgetUsdPerReview })} wrapperClassName="w-[110px]" />
       </Field>
-      <EnvironmentField />
-    </Section>
+    </>
   )
 }
 
@@ -307,7 +333,7 @@ export function SettingsScreen() {
   const scrollRef = useRef<HTMLDivElement>(null)
   const initialDemoMode = useRef(settings?.demoMode)
 
-  // Other screens send the user to a section, such as the Claude checks after a failed environment check.
+  // Other screens send the user to a section, such as the engine checks after a failed environment check.
   useEffect(() => {
     if (!pending || !settings) return
     setActive(pending)
@@ -366,7 +392,7 @@ export function SettingsScreen() {
             <ReviewersSection settings={settings} save={save} />
             <LoadoutsSection settings={settings} save={save} />
             <RepositoriesSection settings={settings} save={save} />
-            <ClaudeSection settings={settings} save={save} />
+            <EngineSection settings={settings} save={save} />
             <WorktreesSection settings={settings} save={save} />
           </div>
         </div>

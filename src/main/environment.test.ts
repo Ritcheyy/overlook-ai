@@ -59,6 +59,19 @@ const happy: Handler = (cmd, args) => {
   return undefined
 }
 
+const AGENT = '/Users/demo/.local/bin/agent'
+const cursorHappy =
+  (loggedIn: boolean): Handler =>
+  (cmd, args) => {
+    if (cmd === 'gh' && args[0] === 'auth') return ok(LOGGED_IN)
+    if (commandV(cmd, args) === 'agent') return ok(`${AGENT}\n`)
+    if (loginShell(cmd, args)) return fail(1, '')
+    if (cmd === AGENT && args[0] === '--version') return ok('2026.10.01-e373342\n')
+    if (cmd === AGENT && args[0] === 'status') return ok(JSON.stringify({ status: loggedIn ? 'authenticated' : 'unauthenticated', isAuthenticated: loggedIn }))
+    if (cmd === 'git' && args[0] === '--version') return ok('git version 2.50.1\n')
+    return undefined
+  }
+
 function fakeFs(opts: { executables?: string[]; mkdirError?: string } = {}): { fs: EnvironmentFs; ops: string[] } {
   const ops: string[] = []
   return {
@@ -117,6 +130,29 @@ describe('checkEnvironment', () => {
     expect(ops[0]).toBe('mkdir /Users/demo/.overlook/worktrees')
     expect(ops[1]).toMatch(/^write \/Users\/demo\/\.overlook\/worktrees\/\.write-probe-\d+-\d+$/)
     expect(ops[2]).toBe(ops[1].replace('write', 'rm'))
+  })
+
+  it('checks the Cursor CLI and its login in place of Claude Code when Cursor is the engine', async () => {
+    const { run, calls } = check(cursorHappy(true), { reviewerEngine: 'cursor' })
+    const result = await run()
+    expect(result.ok).toBe(true)
+    expect(result.items.map((i) => i.id)).toEqual(['gh', 'cursor', 'git', 'worktreeRoot'])
+    expect(result.items[1]).toEqual({ id: 'cursor', label: 'Cursor CLI', ok: true, detail: `Cursor CLI 2026.10.01-e373342 at ${AGENT}, logged in` })
+    expect(calls.some((c) => commandV(c.cmd, c.args) === 'claude' || c.cmd === CLAUDE)).toBe(false)
+    expect(calls.find((c) => c.cmd === AGENT && c.args[0] === 'status')?.args).toEqual(['status', '--format', 'json'])
+  })
+
+  it('tells the user to log the Cursor CLI in', async () => {
+    const result = await check(cursorHappy(false), { reviewerEngine: 'cursor' }).run()
+    expect(result.ok).toBe(false)
+    expect(result.items[1]).toMatchObject({ id: 'cursor', ok: false, detail: `Cursor CLI 2026.10.01-e373342 at ${AGENT} is not logged in. Run: agent login` })
+  })
+
+  it('names Cursor when its CLI cannot be found', async () => {
+    const result = await check(happy, { reviewerEngine: 'cursor' }).run()
+    expect(result.items[1]).toMatchObject({ id: 'cursor', ok: false })
+    expect(result.items[1].detail).toContain('Could not find "agent"')
+    expect(result.items[1].detail).toContain('Set the full path to the Cursor CLI in Settings.')
   })
 
   it('falls back to a login shell when the app PATH lacks claude', async () => {

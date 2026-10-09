@@ -3,7 +3,7 @@
  * settings for a single review, so a re-run can try another model without
  * touching the defaults.
  */
-import type { PrComment, RunOptions, Settings } from '../domain'
+import type { PrComment, ReviewerEngine, RunOptions, Settings } from '../domain'
 
 const EFFORTS = new Set(['', 'low', 'medium', 'high', 'max'])
 const MAX_MODEL_LENGTH = 120
@@ -23,14 +23,37 @@ export function sanitizeRunOptions(raw: RunOptions | undefined): RunOptions | un
   return Object.keys(out).length > 0 ? out : undefined
 }
 
+/** Settings saved before the engine choice existed name no engine and ran Claude Code. */
+export function engineOf(settings: Pick<Settings, 'reviewerEngine'>): ReviewerEngine {
+  return settings.reviewerEngine === 'cursor' ? 'cursor' : 'claude'
+}
+
+/** The model the selected engine is asked for; empty means that CLI's own default. */
+export function runModel(settings: Settings): string {
+  return (engineOf(settings) === 'cursor' ? settings.cursorModel : settings.claudeModel) ?? ''
+}
+
+/** The effort level a run passes on; only Claude Code has one. */
+export function runEffort(settings: Settings): Settings['claudeEffort'] {
+  return engineOf(settings) === 'cursor' ? undefined : settings.claudeEffort
+}
+
+/** The budget cap a run passes on; the Cursor CLI reports no cost, so it has none. */
+export function runBudgetUsd(settings: Settings): number | undefined {
+  return engineOf(settings) === 'cursor' ? undefined : settings.maxBudgetUsdPerReview
+}
+
 /** The settings one run sees. Empty strings clear the setting, which the CLI reads as its own default. */
 export function applyRunOptions(settings: Settings, options: RunOptions | undefined): Settings {
   if (!options) return settings
   const next: Settings = { ...settings }
   if (options.model !== undefined) {
-    next.claudeModel = options.model
-    // The CLI refuses a fallback that is the model itself, which a one-off switch to the fallback would produce.
-    if (options.model && options.model === next.claudeFallbackModel) next.claudeFallbackModel = undefined
+    if (engineOf(settings) === 'cursor') next.cursorModel = options.model
+    else {
+      next.claudeModel = options.model
+      // The CLI refuses a fallback that is the model itself, which a one-off switch to the fallback would produce.
+      if (options.model && options.model === next.claudeFallbackModel) next.claudeFallbackModel = undefined
+    }
   }
   if (options.effort !== undefined) next.claudeEffort = options.effort || undefined
   if (options.maxBudgetUsd !== undefined) next.maxBudgetUsdPerReview = options.maxBudgetUsd

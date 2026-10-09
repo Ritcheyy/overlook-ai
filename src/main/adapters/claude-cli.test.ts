@@ -1,6 +1,4 @@
-import { EventEmitter } from 'node:events'
 import { homedir } from 'node:os'
-import { PassThrough } from 'node:stream'
 import { describe, expect, it } from 'vitest'
 import type { Activity } from '@core/domain'
 import { defaultSettings } from '@core/loadouts'
@@ -9,63 +7,10 @@ import { BUILT_IN_LOADOUTS, SKILL_MESSAGE_EXAMPLE } from '@core/loadouts'
 import { MAX_INLINE_DIFF_CHARS, buildReviewPrompt } from '@core/review/prompt'
 import { REVIEW_JSON_SCHEMA } from '@core/review/schema'
 import { HEAD_SHA, PREV_SHA, makeRequest, makeRound, makeWorkspace } from '@core/review/test-helpers'
-import { ALLOWED_TOOLS, ClaudeCliRunner, HEADLESS_PREAMBLE, type ClaudeCliRunnerOptions, type SpawnFn, type SpawnOpts } from './claude-cli'
+import { ALLOWED_TOOLS, ClaudeCliRunner, HEADLESS_PREAMBLE, type ClaudeCliRunnerOptions, type SpawnFn } from './claude-cli'
 import type { ExecFn, ExecOptions, ExecResult } from './exec'
+import { FakeChild, fakeSpawn, line } from './test-helpers'
 
-class FakeChild extends EventEmitter {
-  stdin = new PassThrough()
-  stdout = new PassThrough()
-  stderr = new PassThrough()
-  pid = 4242
-  kills: string[] = []
-  stdinText = ''
-  closed = false
-
-  constructor(private readonly ignoreSigterm: boolean) {
-    super()
-    this.stdin.on('data', (chunk: Buffer) => {
-      this.stdinText += chunk.toString()
-    })
-  }
-
-  kill(signal: NodeJS.Signals = 'SIGTERM'): boolean {
-    this.kills.push(signal)
-    if (signal === 'SIGTERM' && this.ignoreSigterm) return true
-    this.exit(null, signal)
-    return true
-  }
-
-  exit(code: number | null, signal: NodeJS.Signals | null = null): void {
-    if (this.closed) return
-    this.closed = true
-    this.stdout.end()
-    this.stderr.end()
-    setImmediate(() => this.emit('close', code, signal))
-  }
-}
-
-interface SpawnCall {
-  command: string
-  args: string[]
-  opts: SpawnOpts
-  child: FakeChild
-}
-
-type Script = (child: FakeChild) => void
-
-function fakeSpawn(script: Script, opts: { ignoreSigterm?: boolean } = {}) {
-  const calls: SpawnCall[] = []
-  const spawn: SpawnFn = (command, args, o) => {
-    const child = new FakeChild(opts.ignoreSigterm ?? false)
-    calls.push({ command, args, opts: o, child })
-    // Replay only after the prompt has been fully written, like a real CLI reading stdin.
-    child.stdin.on('end', () => script(child))
-    return child
-  }
-  return { spawn, calls }
-}
-
-const line = (obj: unknown) => JSON.stringify(obj) + '\n'
 const assistant = (...content: unknown[]) => line({ type: 'assistant', message: { role: 'assistant', content } })
 const toolUse = (name: string, input: Record<string, unknown>) => ({ type: 'tool_use', id: 't1', name, input })
 

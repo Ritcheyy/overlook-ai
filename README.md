@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/Ritcheyy/overlook-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/Ritcheyy/overlook-ai/actions/workflows/ci.yml) ![macOS](https://img.shields.io/badge/platform-macOS-lightgrey) ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 
-A macOS desktop app that reviews your GitHub pull requests with Claude Code, shows the reviewers as characters on a small 3D floor, and stops before posting so you decide what the author sees.
+A macOS desktop app that reviews your GitHub pull requests with Claude Code or the Cursor CLI, shows the reviewers as characters on a small 3D floor, and stops before posting so you decide what the author sees.
 
 ![The floor: two reviewers at their desks, both waiting for triage](docs/images/floor.png)
 
@@ -20,21 +20,21 @@ A macOS desktop app that reviews your GitHub pull requests with Claude Code, sho
 
 ## How it works
 
-Reviews run locally. The app polls GitHub through the `gh` CLI you are already logged in with, creates a worktree for each PR next to your own checkout, and spawns `claude -p` inside it with a read-only tool allow-list, a structured-output schema and a per-review budget. The PR branch's own `.claude/` settings and MCP config are ignored, so a pull request cannot hand the reviewer tools. Comments are posted with your `gh` login. Nothing leaves the machine except what Claude Code and `gh` already send.
+Reviews run locally. The app polls GitHub through the `gh` CLI you are already logged in with, creates a worktree for each PR next to your own checkout, and spawns `claude -p` inside it with a read-only tool allow-list, a structured-output schema and a per-review budget. The PR branch's own `.claude/` settings and MCP config are ignored, so a pull request cannot hand the reviewer tools. Comments are posted with your `gh` login. Nothing leaves the machine except what Claude Code and `gh` already send. With the Cursor CLI as the engine, the same read-only rules go into a `.cursor/cli.json` written into the worktree for the run, and the branch's own `.cursor` folder is set aside meanwhile.
 
 Demo mode is on by default: a fake GitHub and a scripted reviewer drive the whole app, so you can try everything without a login or a token.
 
 ## Status
 
-Overlook is a personal tool I use every day, shared as it is. It runs on macOS, needs Claude Code and the GitHub CLI, and you build it yourself; there are no packaged releases or auto-updates yet. Issues and ideas are welcome, and I'll respond when I can, but it's maintained around my own workflow rather than a roadmap. If it fits yours too, fork away.
+Overlook is a personal tool I use every day, shared as it is. It runs on macOS, needs the GitHub CLI plus Claude Code or the Cursor CLI, and you build it yourself; there are no packaged releases or auto-updates yet. Issues and ideas are welcome, and I'll respond when I can, but it's maintained around my own workflow rather than a roadmap. If it fits yours too, fork away.
 
 ## Requirements
 
 - macOS on Apple silicon (the engine and UI are portable; packaging and the Electron tests are macOS-only for now)
 - Node 22 and pnpm
-- For real reviews: [GitHub CLI](https://cli.github.com) logged in, and the [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) on your machine
+- For real reviews: [GitHub CLI](https://cli.github.com) logged in, and the [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) or the [Cursor CLI](https://cursor.com/docs/cli) on your machine
 
-Reviews spend your Claude Code usage. The per-review budget caps how much work one review may do; on a subscription it is a size limit, not a bill.
+Reviews spend your Claude Code or Cursor usage. The per-review budget caps how much work one Claude Code review may do; on a subscription it is a size limit, not a bill. Cursor reports no cost, so no budget applies there.
 
 ## Quick start
 
@@ -44,7 +44,7 @@ pnpm dev          # Electron app with hot reload, demo mode
 pnpm dev:web      # the UI alone in a browser tab, demo engine in-process
 ```
 
-To review real PRs: Settings > General, turn Demo mode off and press Restart now; Settings > Claude, press Check environment until every row is green; Settings > Repositories, switch off the repos you do not care about. Then send a small PR from the Inbox. `docs/operations.md` has the full checklist and a troubleshooting table.
+To review real PRs: Settings > General, turn Demo mode off and press Restart now; Settings > Engine, pick Claude Code or Cursor and press Check environment until every row is green; Settings > Repositories, switch off the repos you do not care about. Then send a small PR from the Inbox. `docs/operations.md` has the full checklist and a troubleshooting table.
 
 ## Install as an app
 

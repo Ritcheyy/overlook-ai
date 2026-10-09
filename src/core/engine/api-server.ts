@@ -4,7 +4,7 @@
  * (real adapters) and by the browser demo (mocks) alike.
  */
 import type { AppSnapshot, DetectedWorkspace, EnvironmentCheck, FileLinkTarget, Settings } from '../domain'
-import { ENVIRONMENT_CHECK_LABELS } from '../domain'
+import { ENVIRONMENT_CHECK_LABELS, REVIEWER_ENGINES } from '../domain'
 import type { Api, DemoSimulateArgs, Engine, PushEvent, PushEvents } from '../ipc-contract'
 import { RETIRED_SLASH_COMMANDS, defaultSettings } from '../loadouts'
 import type { PersistedState, Ports } from '../ports'
@@ -69,6 +69,7 @@ export function validateSettings(settings: Settings): void {
   }
   if (typeof settings.replyRequest !== 'string') throw new Error('replyRequest must be text')
   if (!FILE_LINK_TARGETS.includes(settings.fileLinks)) throw new Error(`fileLinks must be one of ${FILE_LINK_TARGETS.join(', ')}`)
+  if (!REVIEWER_ENGINES.includes(settings.reviewerEngine)) throw new Error(`reviewerEngine must be one of ${REVIEWER_ENGINES.join(', ')}`)
   if (!Array.isArray(settings.workspaces)) throw new Error('workspaces must be a list')
   const workspaceIds = new Set<string>()
   for (const ws of settings.workspaces) {
@@ -108,6 +109,9 @@ function sanitizeSettings(raw: unknown, defaults: Settings): Settings {
   if (!FILE_LINK_TARGETS.includes(merged.fileLinks)) merged.fileLinks = defaults.fileLinks
   // An empty model is a deliberate "CLI default"; only a missing key takes the app default.
   if (merged.claudeModel === undefined) merged.claudeModel = defaults.claudeModel
+  if (!REVIEWER_ENGINES.includes(merged.reviewerEngine)) merged.reviewerEngine = defaults.reviewerEngine
+  if (typeof merged.cursorPath !== 'string' || !merged.cursorPath.trim()) merged.cursorPath = defaults.cursorPath
+  if (typeof merged.cursorModel !== 'string') merged.cursorModel = defaults.cursorModel
   for (const key of ['projectsRoots', 'autoPostRepos', 'inactiveRepos'] as const) {
     if (!Array.isArray(merged[key])) merged[key] = defaults[key]
   }
@@ -315,7 +319,7 @@ export function createEngine(opts: EngineOptions): Engine {
       : {
           checkedAt: ports.clock.now().toISOString(),
           ok: false,
-          items: [{ id: 'claude', label: ENVIRONMENT_CHECK_LABELS.claude, ok: false, detail: 'Environment checks are only available in the desktop app' }]
+          items: [{ id: state.settings.reviewerEngine, label: ENVIRONMENT_CHECK_LABELS[state.settings.reviewerEngine], ok: false, detail: 'Environment checks are only available in the desktop app' }]
         }
     state.environment = structuredClone(result)
     if (!stopped) emitSnapshotNow()

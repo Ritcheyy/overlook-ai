@@ -5,12 +5,26 @@ Running Overlook for real, packaging it, and what to do when something looks wro
 ## Real mode checklist
 
 1. `gh auth status` shows you logged in to github.com.
-2. `claude --version` works in your terminal. If it is installed by nvm or under a path only your `.zshrc` knows, set the absolute path in Settings > Claude.
+2. `claude --version` works in your terminal (or `agent --version` for Cursor; see below). If it is installed by nvm or under a path only your `.zshrc` knows, set the absolute path in Settings > Engine.
 3. Your repositories are checked out under a folder listed in Settings > Repositories > Project roots. Discovery scans two levels deep.
 4. Settings > General: turn Demo mode off and press Restart now.
-5. Settings > Claude: press Check environment. Every row must be green.
+5. Settings > Engine: press Check environment. Every row must be green.
 6. Settings > Repositories: switch off the repos you do not review. Inactive repos are hidden and never fetched in detail.
 7. Start a review of one small PR from the Inbox and read the result in Triage before turning on auto-post for a repo.
+
+## Reviewing with Cursor instead of Claude Code
+
+Settings > Engine chooses the CLI that runs reviews. For Cursor:
+
+1. Install the CLI with `curl https://cursor.com/install -fsS | bash`, then run `agent login`. `agent models` lists the names your account can use; the free tier works with the Auto choice.
+2. Settings > Engine: pick Cursor, keep the path as `agent` or set the absolute one, set a model name or leave it empty for Auto, and press Check environment. The check also confirms the login.
+
+What differs from Claude Code:
+
+- The run is kept read-only through a `.cursor/cli.json` the app writes into the worktree for its duration: files in the workspace, `git diff`, `git log`, `git show`, `git blame`, `git status`, `gh pr diff` and `gh pr view`. Everything else, writes included, is rejected. The PR branch's own `.cursor` folder is renamed to `.cursor.overlook-aside` while the review runs, so its hooks, rules and MCP config never load, and is put back afterwards.
+- Cursor reports no cost, so rounds show none and the per-review budget does not apply. Effort and the fallback model are Claude Code settings and stay hidden.
+- The reviewer only sees the worktree. Workspace sibling repos and notes are left out of the prompt, and a review type with a Message (a Claude Code skill) runs as the plain generated prompt.
+- The model recorded on a round is the name Cursor announces, such as `Auto`.
 
 ## Packaging and updating
 

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Reviews can run through the Cursor CLI instead of Claude Code. Settings > Engine picks the CLI and its model; a Cursor run stays read-only through a permissions file written into the worktree, with the PR branch's own `.cursor` folder set aside for the review. Cursor reports no cost, so those rounds show none and the budget does not apply.
 - The Review card beside a PR's details names the model and effort of the round on screen. The model id is saved as soon as Claude Code names it, so a running or failed round shows the id instead of the alias.
 
 ## 0.2.0

@@ -510,6 +510,28 @@ describe('engine', () => {
     expect(failed.rounds[0]).toMatchObject({ model: 'demo-reviewer', effort: 'high' })
   })
 
+  it('stamps a Cursor round with its model and neither an effort nor a budget', async () => {
+    const h = await makeEngine({ settings: { reviewerEngine: 'cursor', cursorModel: 'gpt-5.2', claudeEffort: 'high' } })
+    h.runner.block = true
+    const a = await h.api.dispatch({ prId: PR_412 })
+    const reviewing = await waitForState(h, a.id, 'reviewing')
+    expect(reviewing.rounds[0].model).toBe('gpt-5.2')
+    expect(reviewing.rounds[0].effort).toBeUndefined()
+    expect(reviewing.rounds[0].budgetUsd).toBeUndefined()
+    h.runner.release()
+    const done = await waitForState(h, a.id, 'needs_you')
+    expect(done.rounds[0].model).toBe('demo-reviewer')
+    await expect(h.api.updateSettings({ reviewerEngine: 'other' as never })).rejects.toThrow('reviewerEngine must be one of claude, cursor')
+  })
+
+  it('defaults the engine fields of a settings file saved before they existed', async () => {
+    const { reviewerEngine: _engine, cursorPath: _path, cursorModel: _model, ...older } = defaultSettings({ claudeModel: 'opus' })
+    const store = new MemoryStore({ missions: [], inbox: [], settings: older as Settings })
+    const h = await makeEngine({ store })
+    const snapshot = await waitFor(h, () => true)
+    expect(snapshot.settings).toMatchObject({ reviewerEngine: 'claude', cursorPath: 'agent', cursorModel: '', claudeModel: 'opus' })
+  })
+
   it('records the model the runner reports while the review is still running', async () => {
     const h = await makeEngine({ settings: { claudeModel: 'opus' } })
     h.runner.block = true

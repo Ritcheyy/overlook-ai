@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { Folder } from 'lucide-react'
 import type { Mission, PullRequest, ReviewRound, Settings, Slot } from '@core/domain'
 import { autoRoundsUsed } from '@core/domain'
-import { applyRunOptions } from '@core/engine/run-options'
+import { applyRunOptions, engineOf, runEffort, runModel } from '@core/engine/run-options'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/cn'
 import { formatUsd } from '@/lib/format'
@@ -29,8 +29,8 @@ function ModelFact({ mission, round, settings }: { mission: Mission; round?: Rev
   let effort = round?.effort
   if (!round) {
     const next = applyRunOptions(settings, mission.runOptions)
-    model = next.claudeModel || 'default'
-    effort = next.claudeEffort ?? 'default'
+    model = runModel(next) || 'default'
+    effort = engineOf(next) === 'claude' ? (runEffort(next) ?? 'default') : undefined
   }
   if (!model) return null
   const older = !!round && round.id !== mission.rounds[mission.rounds.length - 1]?.id

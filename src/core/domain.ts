@@ -301,6 +301,8 @@ export interface Settings {
   slots: Slot[]
   loadouts: Loadout[]
   defaultLoadoutId: string
+  /** Which CLI runs real reviews; the fields below configure each. */
+  reviewerEngine: ReviewerEngine
   /** Executable name or absolute path of the Claude Code CLI. */
   claudePath: string
   /** Alias (`opus`) or full model id passed to `--model`; empty leaves the CLI default. */
@@ -309,6 +311,10 @@ export interface Settings {
   /** Alias passed to `--fallback-model`, used when the main model is overloaded; unset for none. */
   claudeFallbackModel?: string
   maxBudgetUsdPerReview: number
+  /** Executable name or absolute path of the Cursor CLI (`agent`). */
+  cursorPath: string
+  /** Model name passed to the Cursor CLI's `--model`; empty leaves its Auto default. */
+  cursorModel: string
   /** Where worktrees live: `<worktreeRoot>/<owner>/<name>/pr-<number>` */
   worktreeRoot: string
   /** Repos whose approved findings post without a triage stop. */
@@ -352,6 +358,10 @@ export interface Settings {
 
 export type FileLinkTarget = 'vscode' | 'cursor' | 'github'
 
+export type ReviewerEngine = 'claude' | 'cursor'
+export const REVIEWER_ENGINES: readonly ReviewerEngine[] = ['claude', 'cursor']
+export const REVIEWER_ENGINE_LABELS: Record<ReviewerEngine, string> = { claude: 'Claude Code', cursor: 'Cursor' }
+
 export interface AppSnapshot {
   inbox: PullRequest[]
   missions: Mission[]
@@ -366,7 +376,7 @@ export interface AppSnapshot {
   environment?: EnvironmentCheck
 }
 
-export type EnvironmentCheckId = 'gh' | 'claude' | 'git' | 'worktreeRoot'
+export type EnvironmentCheckId = 'gh' | 'claude' | 'cursor' | 'git' | 'worktreeRoot'
 
 export interface EnvironmentCheckItem {
   id: EnvironmentCheckId
@@ -386,6 +396,7 @@ export interface EnvironmentCheck {
 export const ENVIRONMENT_CHECK_LABELS: Record<EnvironmentCheckId, string> = {
   gh: 'GitHub CLI',
   claude: 'Claude Code',
+  cursor: 'Cursor CLI',
   git: 'Git',
   worktreeRoot: 'Worktree root'
 }

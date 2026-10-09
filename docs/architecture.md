@@ -14,7 +14,7 @@ Overlook is an Electron app with one deliberate split: an engine that knows noth
 │  └──────────┬───────────┘                 └────────────────────────┘ │
 │             │ ports                                                  │
 │  ┌──────────▼───────────┐                                            │
-│  │ adapters (src/main)  │  gh CLI · git worktrees · claude -p        │
+│  │ adapters (src/main)  │  gh CLI · git worktrees · claude -p · agent│
 │  │                      │  repo discovery · JSON store · notifier    │
 │  └──────────────────────┘                                            │
 └──────────────────────────────────────────────────────────────────────┘
@@ -53,7 +53,7 @@ A mission holds a slot (a character) from `preparing` through `posting`. `watchi
 
 1. `WorktreePort.prepare` fetches `refs/pull/<n>/head` and the base branch into the local clone, adds or updates a detached worktree at `<worktreeRoot>/<owner>/<repo>/pr-<n>`, links `node_modules`, runs the optional prepare command.
 2. The scheduler builds the `ReviewRequest`: mission, round, loadout, diff (full PR diff on round one, empty on follow-ups so the runner computes the delta), previous round, the author's replies to it, the settings with the run's options applied, workspace context.
-3. `ClaudeCliRunner` spawns `claude -p --output-format stream-json --json-schema … --max-budget-usd … --allowedTools … --setting-sources user --strict-mcp-config`, writes the prompt to stdin, maps tool-use events to activity for the floor, captures the resolved model, and parses the final result strictly.
+3. `EngineRunner` hands the request to the CLI the settings name. `ClaudeCliRunner` spawns `claude -p --output-format stream-json --json-schema … --max-budget-usd … --allowedTools … --setting-sources user --strict-mcp-config`, writes the prompt to stdin, maps tool-use events to activity for the floor, captures the resolved model, and parses the final result strictly. `CursorCliRunner` spawns `agent -p --output-format stream-json --trust --workspace …` the same way, with the read-only rules in a `.cursor/cli.json` written into the worktree for the run (the branch's own `.cursor` set aside meanwhile) and the review JSON parsed out of the result text. Both share the process driver in `cli-process.ts`.
 4. Findings get ids and a decision (`pending`, or `approved` for auto-post). The round stores summary, verdict, briefing, model, effort, budget, trigger, the replies it was given, cost, duration and the last activity lines.
 5. `needs_you` waits for triage, or auto-post goes straight to `posting`. Posting uses `gh pr comment --body-file -`.
 
