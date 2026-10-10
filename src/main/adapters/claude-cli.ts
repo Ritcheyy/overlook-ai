@@ -9,13 +9,17 @@ import { isAbsolute } from 'node:path'
 import type { Activity, Settings } from '@core/domain'
 import { expandHome } from '@core/engine/paths'
 import type { ReviewRequest, ReviewResult, RunnerPort, WorkspaceContext } from '@core/ports'
-import { MAX_INLINE_DIFF_CHARS, buildReviewPrompt } from '@core/review/prompt'
+import { buildReviewPrompt } from '@core/review/prompt'
 import { MissingFindingsError, envelopeMeta, parseReviewOutput } from '@core/review/parse'
 import { REPORT_FINDINGS_TOOL, carriesFindings, reviewFromReportFindings } from '@core/review/report-findings'
 import { REVIEW_JSON_SCHEMA } from '@core/review/schema'
 import { resolveClaudePath } from '../environment'
+import { KILL_GRACE_MS, REVIEW_TIMEOUT_MS, deltaDiff, describeExit, driveStreamJson, isRecord, relativeTo, str, type ChildLike, type SpawnFn } from './cli-process'
 import { exec as defaultExec } from './exec'
 import type { ExecFn } from './exec'
+
+export { DELTA_DIFF_TIMEOUT_MS, KILL_GRACE_MS, REVIEW_TIMEOUT_MS } from './cli-process'
+export type { ChildLike, SpawnFn, SpawnOpts } from './cli-process'
 
 export const ALLOWED_TOOLS: readonly string[] = [
   'Read',
@@ -49,32 +53,7 @@ export function workspaceTools(workspace?: WorkspaceContext): string[] {
 export const HEADLESS_PREAMBLE =
   'You are being run headless by a desktop app. Do not post to GitHub, do not use --comment or --fix, do not edit files. When the skill finishes, return the findings through the structured output schema. If you use a skill, run it inside this conversation and, when it is done, return the review through the structured output; the ReportFindings tool is optional and the app will read it if you call it.'
 
-export const REVIEW_TIMEOUT_MS = 30 * 60_000
-export const KILL_GRACE_MS = 5_000
-export const DELTA_DIFF_TIMEOUT_MS = 20_000
-const STDERR_TAIL_LINES = 20
-const GIT_ENV = { GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0' }
 const THINKING_PREVIEW_CHARS = 100
-
-export interface SpawnOpts {
-  cwd: string
-  env: NodeJS.ProcessEnv
-  stdio: 'pipe'
-  windowsHide: boolean
-}
-
-/** The slice of ChildProcess the runner relies on; fakes implement just this. */
-export interface ChildLike {
-  pid?: number
-  stdin: NodeJS.WritableStream | null
-  stdout: NodeJS.ReadableStream | null
-  stderr: NodeJS.ReadableStream | null
-  kill(signal?: NodeJS.Signals): boolean
-  on(event: 'close', listener: (code: number | null, signal: NodeJS.Signals | null) => void): this
-  on(event: 'error', listener: (err: Error) => void): this
-}
-
-export type SpawnFn = (command: string, args: string[], opts: SpawnOpts) => ChildLike
 
 export interface ClaudeCliRunnerOptions {
   spawn?: SpawnFn
@@ -87,14 +66,6 @@ export interface ClaudeCliRunnerOptions {
 }
 
 type ActivityLite = Omit<Activity, 'missionId' | 'at'>
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function str(value: unknown): string {
-  return typeof value === 'string' ? value : ''
-}
 
 export function renderSlashCommand(command: string, prNumber: number): string {
   return command.replaceAll('{number}', String(prNumber)).trim()
@@ -150,11 +121,6 @@ export function resultModel(event: Record<string, unknown>): string | undefined 
     }
   }
   return best
-}
-
-function relativeTo(root: string, path: string): string {
-  const base = root.endsWith('/') ? root : `${root}/`
-  return path.startsWith(base) ? path.slice(base.length) : path
 }
 
 function toolActivity(name: string, input: Record<string, unknown>, worktreePath: string): ActivityLite {
@@ -228,7 +194,7 @@ export class ClaudeCliRunner implements RunnerPort {
 
   async review(req: ReviewRequest): Promise<ReviewResult> {
     if (req.signal?.aborted) throw new Error('Cancelled')
-    const diff = req.diff.trim() ? req.diff : await this.deltaDiff(req)
+    const diff = req.diff.trim() ? req.diff : await deltaDiff(this.exec, req)
     const reviewPrompt = buildReviewPrompt({ ...req, diff })
     const slash = req.loadout.slashCommand ? renderSlashCommand(req.loadout.slashCommand, req.mission.pr.number) : ''
     const prompt = slash || reviewPrompt
@@ -248,23 +214,6 @@ export class ClaudeCliRunner implements RunnerPort {
     return this.drive(child, req, prompt, command)
   }
 
-  /** The changes since the previous round, or '' when git cannot produce them or they are too big to inline. */
-  private async deltaDiff(req: ReviewRequest): Promise<string> {
-    const previous = req.previousRound?.headSha
-    if (!previous) return ''
-    try {
-      const res = await this.exec('git', ['-C', req.worktreePath, 'diff', `${previous}..HEAD`], {
-        env: GIT_ENV,
-        signal: req.signal,
-        timeoutMs: DELTA_DIFF_TIMEOUT_MS
-      })
-      if (res.code !== 0 || res.stdout.length >= MAX_INLINE_DIFF_CHARS) return ''
-      return res.stdout
-    } catch {
-      return ''
-    }
-  }
-
   private async resolveCommand(claudePath: string): Promise<string> {
     const command = expandHome(claudePath, homedir())
     if (isAbsolute(command)) return command
@@ -275,128 +224,42 @@ export class ClaudeCliRunner implements RunnerPort {
     }
   }
 
-  private drive(child: ChildLike, req: ReviewRequest, prompt: string, command: string): Promise<ReviewResult> {
-    return new Promise<ReviewResult>((resolve, reject) => {
-      let settled = false
-      let aborted = false
-      let timedOut = false
-      let outcome: { ok: ReviewResult } | { err: Error } | undefined
-      let reported: Record<string, unknown> | undefined
-      let model: string | undefined
-      let stdoutRest = ''
-      const stderrTail: string[] = []
-      let killTimer: NodeJS.Timeout | undefined
+  private async drive(child: ChildLike, req: ReviewRequest, prompt: string, command: string): Promise<ReviewResult> {
+    let outcome: { ok: ReviewResult } | { err: Error } | undefined
+    let reported: Record<string, unknown> | undefined
+    let model: string | undefined
+    const emit = (a: ActivityLite) => req.onActivity?.(a)
 
-      const emit = (a: ActivityLite) => req.onActivity?.(a)
-
-      const kill = () => {
-        child.kill('SIGTERM')
-        killTimer = setTimeout(() => child.kill('SIGKILL'), this.killGraceMs)
-      }
-      const onAbort = () => {
-        aborted = true
-        kill()
-      }
-      const timeout = setTimeout(() => {
-        timedOut = true
-        kill()
-      }, this.timeoutMs)
-      req.signal?.addEventListener('abort', onAbort, { once: true })
-
-      const cleanup = () => {
-        clearTimeout(timeout)
-        if (killTimer) clearTimeout(killTimer)
-        req.signal?.removeEventListener('abort', onAbort)
-      }
-      const finish = (fn: () => void) => {
-        if (settled) return
-        settled = true
-        cleanup()
-        fn()
-      }
-
-      const handleLine = (line: string) => {
-        const trimmed = line.trim()
-        if (!trimmed) return
-        let event: unknown
+    const onEvent = (event: Record<string, unknown>) => {
+      if (event['type'] === 'result') {
         try {
-          event = JSON.parse(trimmed)
-        } catch {
-          return
+          outcome = { ok: parseReviewOutput(event, { strict: true }) }
+        } catch (e) {
+          // A skill that reported through ReportFindings leaves the result without a payload; the call is the review.
+          if (e instanceof MissingFindingsError && reported) outcome = { ok: reviewFromReportFindings(reported, envelopeMeta(event)) }
+          else outcome = { err: e instanceof Error ? e : new Error(String(e)) }
         }
-        if (!isRecord(event)) return
-        if (event['type'] === 'result') {
-          try {
-            outcome = { ok: parseReviewOutput(event, { strict: true }) }
-          } catch (e) {
-            // A skill that reported through ReportFindings leaves the result without a payload; the call is the review.
-            if (e instanceof MissingFindingsError && reported) outcome = { ok: reviewFromReportFindings(reported, envelopeMeta(event)) }
-            else outcome = { err: e instanceof Error ? e : new Error(String(e)) }
-          }
-          const resolved = model ?? resultModel(event)
-          if (resolved && 'ok' in outcome) outcome.ok.model = resolved
-          return
-        }
-        if (model === undefined) {
-          model = initModel(event)
-          if (model) req.onModel?.(model)
-        }
-        reported = findingsToolInput(event) ?? reported
-        for (const a of activitiesFromEvent(event, req.worktreePath)) emit(a)
+        const resolved = model ?? resultModel(event)
+        if (resolved && 'ok' in outcome) outcome.ok.model = resolved
+        return
       }
-      const flushStdout = () => {
-        let nl: number
-        while ((nl = stdoutRest.indexOf('\n')) !== -1) {
-          handleLine(stdoutRest.slice(0, nl))
-          stdoutRest = stdoutRest.slice(nl + 1)
-        }
+      if (model === undefined) {
+        model = initModel(event)
+        if (model) req.onModel?.(model)
       }
+      reported = findingsToolInput(event) ?? reported
+      for (const a of activitiesFromEvent(event, req.worktreePath)) emit(a)
+    }
 
-      child.stdout?.setEncoding('utf8')
-      child.stdout?.on('data', (chunk: string | Buffer) => {
-        stdoutRest += chunk.toString()
-        flushStdout()
-      })
-      child.stderr?.setEncoding('utf8')
-      child.stderr?.on('data', (chunk: string | Buffer) => {
-        for (const line of chunk.toString().split('\n')) {
-          if (!line.trim()) continue
-          stderrTail.push(line.trimEnd())
-          if (stderrTail.length > STDERR_TAIL_LINES) stderrTail.shift()
-        }
-      })
-
-      child.on('error', (err) => {
-        finish(() => reject(new Error(`Could not start ${command}: ${err.message}`)))
-      })
-      child.on('close', (code, signal) => {
-        flushStdout()
-        if (stdoutRest.trim()) {
-          handleLine(stdoutRest)
-          stdoutRest = ''
-        }
-        finish(() => {
-          if (aborted) return reject(new Error('Cancelled'))
-          if (timedOut) return reject(new Error(`Review timed out after ${Math.round(this.timeoutMs / 60_000)} minutes`))
-          const tail = stderrTail.join('\n').trim()
-          if (outcome && 'err' in outcome) {
-            if (tail) outcome.err.message += `\n\nLast stderr lines:\n${tail}`
-            return reject(outcome.err)
-          }
-          if (outcome) return resolve(outcome.ok)
-          const how = code === 0 ? 'without a result' : signal ? `with signal ${signal}` : `with code ${code}`
-          reject(new Error(`claude exited ${how}${tail ? `: ${tail}` : ''}`))
-        })
-      })
-
-      const stdin = child.stdin
-      if (stdin) {
-        // EPIPE when the CLI dies before reading the prompt; the close handler reports that.
-        stdin.on('error', () => undefined)
-        stdin.write(prompt)
-        stdin.end()
-      }
-      emit({ kind: 'thinking', text: 'Starting Claude Code' })
-    })
+    const run = driveStreamJson(child, { command, prompt, signal: req.signal, timeoutMs: this.timeoutMs, killGraceMs: this.killGraceMs, onEvent })
+    emit({ kind: 'thinking', text: 'Starting Claude Code' })
+    const exit = await run
+    const tail = exit.stderrTail
+    if (outcome && 'err' in outcome) {
+      if (tail) outcome.err.message += `\n\nLast stderr lines:\n${tail}`
+      throw outcome.err
+    }
+    if (outcome) return outcome.ok
+    throw new Error(`claude exited ${describeExit(exit)}${tail ? `: ${tail}` : ''}`)
   }
 }

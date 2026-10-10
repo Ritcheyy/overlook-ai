@@ -102,7 +102,7 @@ function DemoMenu() {
 
 /**
  * Runs the environment check once at start and shows only when something is
- * wrong. Clicking it checks again; a failure links to the Claude settings,
+ * wrong. Clicking it checks again; a failure links to the engine settings,
  * where each check lists what it found.
  */
 function EnvironmentChip() {
@@ -129,7 +129,7 @@ function EnvironmentChip() {
   if (environment?.ok && !checking) return null
   if (!environment || checking) {
     return (
-      <Chip tone="muted" icon={checking ? <LoaderCircle className="h-3 w-3 animate-spin" aria-hidden /> : <ShieldQuestion className="h-3 w-3" aria-hidden />} onClick={() => void check()} className="self-start" title="Checks gh, claude, git and the worktree root">
+      <Chip tone="muted" icon={checking ? <LoaderCircle className="h-3 w-3 animate-spin" aria-hidden /> : <ShieldQuestion className="h-3 w-3" aria-hidden />} onClick={() => void check()} className="self-start" title="Checks gh, the review engine's CLI, git and the worktree root">
         {checking ? 'Checking environment…' : 'Check environment'}
       </Chip>
     )
@@ -139,9 +139,9 @@ function EnvironmentChip() {
     <Chip
       tone="rose"
       icon={<CircleAlert className="h-3 w-3" aria-hidden />}
-      onClick={() => navigate('settings', { section: 'claude' })}
+      onClick={() => navigate('settings', { section: 'engine' })}
       className="self-start"
-      title={`${failed.join(', ')} failed. Open the Claude settings to see why.`}
+      title={`${failed.join(', ')} failed. Open the engine settings to see why.`}
     >
       Environment check failed
     </Chip>

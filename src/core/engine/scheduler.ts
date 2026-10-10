@@ -30,7 +30,7 @@ import type {
 import type { Ports, WorkspaceContext } from '../ports'
 import { buildComment } from '../comment-builder'
 import { expandHome, parsePrId, worktreePathFor } from './paths'
-import { applyRunOptions, sanitizeRunOptions, trimReplies } from './run-options'
+import { applyRunOptions, runBudgetUsd, runEffort, runModel, sanitizeRunOptions, trimReplies } from './run-options'
 import { buildWorkspaceContext, describeWorkspaceContext, workspaceFor } from './workspaces'
 
 export interface EngineState {
@@ -338,10 +338,15 @@ export class Scheduler {
         summary: '',
         verdict: 'comment',
         // An empty model is the CLI default; the runner replaces the alias with what the CLI resolved.
-        model: settings.claudeModel || 'default',
-        effort: settings.claudeEffort ?? 'default',
-        budgetUsd: settings.maxBudgetUsdPerReview,
+        model: runModel(settings) || 'default',
         trigger
+      }
+      // Only Claude Code takes an effort level and a budget; a Cursor round records neither.
+      const effort = runEffort(settings)
+      const budgetUsd = runBudgetUsd(settings)
+      if (budgetUsd !== undefined) {
+        round.effort = effort ?? 'default'
+        round.budgetUsd = budgetUsd
       }
       if (replies) round.replies = replies
       if (workspace) round.workspaceName = workspace.name

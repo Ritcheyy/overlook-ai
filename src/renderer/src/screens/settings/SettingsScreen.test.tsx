@@ -44,6 +44,27 @@ const customInput = () => screen.queryByLabelText('Custom model id') as HTMLInpu
 beforeEach(() => vi.clearAllMocks())
 afterEach(cleanup)
 
+describe('SettingsScreen engine section', () => {
+  it('swaps the Claude fields for the Cursor ones when Cursor is selected', () => {
+    renderSettings()
+    const engine = screen.getByLabelText('Engine') as HTMLSelectElement
+    expect(Array.from(engine.options).map((o) => [o.value, o.label])).toEqual([
+      ['claude', 'Claude Code'],
+      ['cursor', 'Cursor']
+    ])
+    expect((screen.getByLabelText('CLI path') as HTMLInputElement).value).toBe('claude')
+    fireEvent.change(engine, { target: { value: 'cursor' } })
+    expect(api.updateSettings).toHaveBeenCalledWith({ reviewerEngine: 'cursor' })
+    settingsArrive({ reviewerEngine: 'cursor' })
+    expect((screen.getByLabelText('CLI path') as HTMLInputElement).value).toBe('agent')
+    expect((screen.getByLabelText('Model') as HTMLInputElement).placeholder).toBe('auto')
+    expect(screen.queryByLabelText('Fallback model')).toBeNull()
+    expect(screen.queryByLabelText('Effort')).toBeNull()
+    expect(screen.queryByLabelText('Max budget per review')).toBeNull()
+    expect(screen.getByText(/the agent binary and its login/)).toBeTruthy()
+  })
+})
+
 describe('SettingsScreen Claude section', () => {
   it('offers the model aliases and shows Custom with the id for anything else', () => {
     renderSettings({ claudeModel: 'claude-fable-5' })

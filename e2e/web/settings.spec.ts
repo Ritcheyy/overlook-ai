@@ -47,7 +47,7 @@ test('poll interval and reviewer names survive a reload', async ({ page }) => {
   await expect(page.getByLabel('Automatic follow-up rounds')).toHaveValue('0')
 
   // The demo engine answers the preflight itself, so every row is ok without touching gh or claude.
-  await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Claude' }).click()
+  await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Engine' }).click()
   await expect(page.getByRole('list', { name: 'Environment checks' })).toHaveCount(0)
   await page.getByRole('button', { name: 'Check environment' }).click()
   const checks = page.getByRole('list', { name: 'Environment checks' })

@@ -19,6 +19,8 @@ import { MockRunner } from '@core/mocks/runner'
 import { MockWorktree } from '@core/mocks/worktree'
 import { updatedSince } from '@core/engine/poller'
 import { ClaudeCliRunner } from './adapters/claude-cli'
+import { CursorCliRunner } from './adapters/cursor-cli'
+import { EngineRunner } from './adapters/engine-runner'
 import { GhCliGitHub, type SearchFilter } from './adapters/gh-cli'
 import { GitWorktree } from './adapters/git-worktree'
 import { JsonFileStore } from './adapters/json-store'
@@ -83,7 +85,7 @@ export async function bootstrap(): Promise<Engine> {
     : {
         github: new GhCliGitHub({ filter: searchFilter }),
         worktree: new GitWorktree(),
-        runner: new ClaudeCliRunner(),
+        runner: new EngineRunner({ claude: new ClaudeCliRunner(), cursor: new CursorCliRunner() }),
         repos: new RepoDiscovery(),
         store,
         notifier: electronNotifier(),

@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState, type ReactNode } from 'react'
 import { ChevronDown, LoaderCircle } from 'lucide-react'
 import type { RunOptions, Settings } from '@core/domain'
+import { engineOf } from '@core/engine/run-options'
 import { cn } from '@/lib/cn'
 import { selectSettings, useAppStore } from '@/state/store'
 import { Button } from '../ui/Button'
@@ -130,7 +131,11 @@ function RunOptionsForm({ settings, loadoutId: initialLoadout, autoPost: initial
 
   const loadouts: SelectOption[] = settings.loadouts.map((l) => ({ value: l.id, label: l.name }))
   if (!loadouts.some((o) => o.value === loadoutId)) loadouts.unshift({ value: loadoutId, label: loadoutId })
-  const modelOptions: SelectOption[] = [{ value: DEFAULT, label: `As in Settings: ${modelLabel(settings.claudeModel)}` }, ...MODEL_ALIASES, { value: CUSTOM, label: 'Custom model id…' }]
+  // Cursor takes a model name and nothing else: no aliases, effort or budget.
+  const cursor = engineOf(settings) === 'cursor'
+  const modelOptions: SelectOption[] = cursor
+    ? [{ value: DEFAULT, label: `As in Settings: ${settings.cursorModel || 'Auto'}` }, { value: CUSTOM, label: 'Custom model name…' }]
+    : [{ value: DEFAULT, label: `As in Settings: ${modelLabel(settings.claudeModel)}` }, ...MODEL_ALIASES, { value: CUSTOM, label: 'Custom model id…' }]
   const effortOptions: SelectOption[] = [{ value: DEFAULT, label: `As in Settings: ${effortLabel(settings.claudeEffort)}` }, ...EFFORTS]
 
   const submit = () => {
@@ -167,27 +172,31 @@ function RunOptionsForm({ settings, loadoutId: initialLoadout, autoPost: initial
       </label>
       {model === CUSTOM && (
         <label className={row}>
-          <span className="text-[12px] text-muted">Model id</span>
-          <Input size="sm" aria-label="Custom model id" placeholder="e.g. claude-fable-5" value={customModel} onChange={(e) => setCustomModel(e.target.value)} className="font-mono" />
+          <span className="text-[12px] text-muted">{cursor ? 'Model name' : 'Model id'}</span>
+          <Input size="sm" aria-label="Custom model id" placeholder={cursor ? 'e.g. gpt-5.2' : 'e.g. claude-fable-5'} value={customModel} onChange={(e) => setCustomModel(e.target.value)} className="font-mono" />
         </label>
       )}
-      <label className={row}>
-        <span className="text-[12px] text-muted">Effort</span>
-        <Select size="sm" aria-label="Effort" value={effort} onChange={(e) => setEffort(e.target.value)} options={effortOptions} />
-      </label>
-      <label className={row}>
-        <span className="text-[12px] text-muted">Budget</span>
-        <Input
-          size="sm"
-          type="number"
-          min={0}
-          step={0.5}
-          aria-label="Budget in dollars"
-          placeholder={`$${settings.maxBudgetUsdPerReview} from Settings`}
-          value={budget}
-          onChange={(e) => setBudget(e.target.value)}
-        />
-      </label>
+      {!cursor && (
+        <>
+          <label className={row}>
+            <span className="text-[12px] text-muted">Effort</span>
+            <Select size="sm" aria-label="Effort" value={effort} onChange={(e) => setEffort(e.target.value)} options={effortOptions} />
+          </label>
+          <label className={row}>
+            <span className="text-[12px] text-muted">Budget</span>
+            <Input
+              size="sm"
+              type="number"
+              min={0}
+              step={0.5}
+              aria-label="Budget in dollars"
+              placeholder={`$${settings.maxBudgetUsdPerReview} from Settings`}
+              value={budget}
+              onChange={(e) => setBudget(e.target.value)}
+            />
+          </label>
+        </>
+      )}
       <label className="flex cursor-pointer items-center gap-2 px-2 py-1.5 text-[12px] text-muted">
         <input type="checkbox" className="h-3.5 w-3.5 accent-accent" checked={autoPost} onChange={(e) => setAutoPost(e.target.checked)} />
         <span>Post without triage</span>

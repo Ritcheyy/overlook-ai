@@ -1,7 +1,8 @@
 /**
- * Real-mode preflight: gh login, a runnable Claude Code CLI, git, and a
- * writable worktree root. Commands and the file system are injectable so the
- * checks run against fakes in tests.
+ * Real-mode preflight: gh login, a runnable reviewer CLI (Claude Code or
+ * Cursor, whichever the settings name), git, and a writable worktree root.
+ * Commands and the file system are injectable so the checks run against
+ * fakes in tests.
  */
 import { constants as fsConstants, promises as nodeFs } from 'node:fs'
 import { homedir } from 'node:os'
@@ -9,6 +10,7 @@ import { isAbsolute, join, resolve } from 'node:path'
 import type { EnvironmentCheck, EnvironmentCheckId, EnvironmentCheckItem, Settings } from '@core/domain'
 import { ENVIRONMENT_CHECK_LABELS } from '@core/domain'
 import { expandHome } from '@core/engine/paths'
+import { engineOf } from '@core/engine/run-options'
 import { exec as defaultExec } from './adapters/exec'
 import type { ExecFn, ExecResult } from './adapters/exec'
 import { GH_ENV } from './adapters/gh-cli'
@@ -75,18 +77,19 @@ function foundPath(res: ExecResult): string | undefined {
 }
 
 /**
- * Turns the claudePath setting into something spawn can run. An absolute path
+ * Turns a CLI path setting into something spawn can run. An absolute path
  * must be an executable file. A bare name is looked up on the app's PATH plus
  * the usual install dirs, then through a login shell, which sees the PATH the
  * user's profile builds (nvm, ~/.local/bin) and a Finder-launched app does not.
+ * `label` names the tool in errors: "Claude Code" or "Cursor".
  */
-export async function resolveClaudePath(claudePath: string, deps: ResolveClaudePathDeps = {}): Promise<string> {
+export async function resolveCliPath(cliPath: string, label: string, deps: ResolveClaudePathDeps = {}): Promise<string> {
   const exec = deps.exec ?? defaultExec
   const fs = deps.fs ?? nodeFs
   const env = deps.env ?? process.env
   const homeDir = deps.homeDir ?? homedir()
-  const path = expandHome(claudePath.trim(), homeDir)
-  if (!path) throw new Error('Claude Code path is empty; set it in Settings')
+  const path = expandHome(cliPath.trim(), homeDir)
+  if (!path) throw new Error(`${label} path is empty; set it in Settings`)
 
   if (isAbsolute(path)) {
     try {
@@ -131,8 +134,12 @@ export async function resolveClaudePath(claudePath: string, deps: ResolveClaudeP
     }
   }
   throw new Error(
-    `Could not find "${path}": tried ${attempts.map((a) => a.tried).join(' and ')}. Set the full path to the Claude Code CLI in Settings.`
+    `Could not find "${path}": tried ${attempts.map((a) => a.tried).join(' and ')}. Set the full path to the ${label} CLI in Settings.`
   )
+}
+
+export function resolveClaudePath(claudePath: string, deps: ResolveClaudePathDeps = {}): Promise<string> {
+  return resolveCliPath(claudePath, 'Claude Code', deps)
 }
 
 async function checkGh(exec: ExecFn, env: NodeJS.ProcessEnv): Promise<EnvironmentCheckItem> {
@@ -175,6 +182,43 @@ async function checkClaude(claudePath: string, deps: Required<ResolveClaudePathD
   return item('claude', true, `Claude Code ${version} at ${path}`)
 }
 
+/** The Cursor CLI must run and be logged in; `agent status --format json` says which. */
+async function checkCursor(cursorPath: string, deps: Required<ResolveClaudePathDeps>): Promise<EnvironmentCheckItem> {
+  let path: string
+  try {
+    path = await resolveCliPath(cursorPath, 'Cursor', deps)
+  } catch (e) {
+    return item('cursor', false, message(e))
+  }
+  let res: ExecResult
+  try {
+    res = await deps.exec(path, ['--version'], { env: deps.env, timeoutMs: PROBE_TIMEOUT_MS })
+  } catch (e) {
+    return item('cursor', false, `Could not run ${path}: ${message(e)}`)
+  }
+  if (res.code !== 0) {
+    const why = tail(res.stderr) || tail(res.stdout)
+    return item('cursor', false, `${path} --version failed (exit ${res.code})${why ? `: ${why}` : ''}`)
+  }
+  const version = lines(res.stdout)[0] || 'unknown version'
+  const found = `Cursor CLI ${version} at ${path}`
+  let status: ExecResult
+  try {
+    status = await deps.exec(path, ['status', '--format', 'json'], { env: deps.env, timeoutMs: PROBE_TIMEOUT_MS })
+  } catch (e) {
+    return item('cursor', false, `${found}; could not check its login: ${message(e)}`)
+  }
+  let loggedIn: boolean | undefined
+  try {
+    const parsed: unknown = JSON.parse(status.stdout)
+    if (parsed && typeof parsed === 'object' && 'isAuthenticated' in parsed) loggedIn = (parsed as { isAuthenticated?: unknown }).isAuthenticated === true
+  } catch {
+    loggedIn = undefined
+  }
+  if (loggedIn === false) return item('cursor', false, `${found} is not logged in. Run: agent login`)
+  return item('cursor', true, loggedIn ? `${found}, logged in` : found)
+}
+
 async function checkGit(exec: ExecFn, env: NodeJS.ProcessEnv): Promise<EnvironmentCheckItem> {
   let res: ExecResult
   try {
@@ -206,9 +250,10 @@ export async function checkEnvironment(settings: Settings, homeDir: string, deps
   const exec = deps.exec ?? defaultExec
   const fs = deps.fs ?? nodeFs
   const env = deps.env ?? process.env
+  const cliDeps = { exec, fs, env, homeDir }
   const items = await Promise.all([
     checkGh(exec, env),
-    checkClaude(settings.claudePath, { exec, fs, env, homeDir }),
+    engineOf(settings) === 'cursor' ? checkCursor(settings.cursorPath, cliDeps) : checkClaude(settings.claudePath, cliDeps),
     checkGit(exec, env),
     checkWorktreeRoot(settings.worktreeRoot, homeDir, fs)
   ])

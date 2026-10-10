@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import { defaultSettings } from '../loadouts'
-import { MAX_REPLIES, MAX_REPLY_CHARS, applyRunOptions, sanitizeRunOptions, trimReplies } from './run-options'
+import { MAX_REPLIES, MAX_REPLY_CHARS, applyRunOptions, engineOf, runBudgetUsd, runEffort, runModel, sanitizeRunOptions, trimReplies } from './run-options'
+
+describe('engine helpers', () => {
+  it('treat settings without an engine as Claude Code and read the model, effort and budget of the selected CLI', () => {
+    const claude = defaultSettings({ claudeModel: 'opus', claudeEffort: 'max', maxBudgetUsdPerReview: 15, cursorModel: 'gpt-5.2' })
+    expect(engineOf({ reviewerEngine: undefined as never })).toBe('claude')
+    expect([runModel(claude), runEffort(claude), runBudgetUsd(claude)]).toEqual(['opus', 'max', 15])
+    const cursor = { ...claude, reviewerEngine: 'cursor' as const }
+    expect([runModel(cursor), runEffort(cursor), runBudgetUsd(cursor)]).toEqual(['gpt-5.2', undefined, undefined])
+  })
+})
 
 describe('sanitizeRunOptions', () => {
   it('keeps well-formed choices and drops the rest', () => {
@@ -19,6 +29,11 @@ describe('applyRunOptions', () => {
     expect(next).toMatchObject({ claudeModel: 'sonnet', claudeEffort: 'max', maxBudgetUsdPerReview: 3 })
     expect(applyRunOptions(settings, { model: '', effort: '' })).toMatchObject({ claudeModel: '', claudeEffort: undefined })
     expect(settings.claudeModel).toBe('opus')
+  })
+
+  it('sets the Cursor model for a Cursor run and leaves the Claude settings alone', () => {
+    const settings = defaultSettings({ reviewerEngine: 'cursor', claudeModel: 'opus', claudeFallbackModel: 'sonnet', cursorModel: '' })
+    expect(applyRunOptions(settings, { model: 'sonnet' })).toMatchObject({ cursorModel: 'sonnet', claudeModel: 'opus', claudeFallbackModel: 'sonnet' })
   })
 
   it('drops the fallback for a run that switches to the fallback model itself', () => {

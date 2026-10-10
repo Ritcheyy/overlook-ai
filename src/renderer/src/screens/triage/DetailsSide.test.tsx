@@ -19,8 +19,8 @@ const settings = defaultSettings({ claudeModel: 'opus', claudeEffort: 'max' })
 const first = makeRound({ id: 'r1', index: 1, model: 'claude-opus-5', effort: 'max' })
 const second = makeRound({ id: 'r2', index: 2, model: 'claude-opus-5-5', effort: 'high' })
 
-function modelFact(mission: Mission, round?: ReviewRound): string | null | undefined {
-  render(<DetailsSide pr={makePr()} mission={mission} round={round} settings={settings} slots={settings.slots} now={Date.parse('2026-09-13T12:00:00Z')} />)
+function modelFact(mission: Mission, round?: ReviewRound, current = settings): string | null | undefined {
+  render(<DetailsSide pr={makePr()} mission={mission} round={round} settings={current} slots={current.slots} now={Date.parse('2026-09-13T12:00:00Z')} />)
   return screen.queryByText('Model')?.nextElementSibling?.textContent
 }
 
@@ -36,6 +36,11 @@ describe('DetailsSide model fact', () => {
     expect(modelFact(makeMission({ rounds: [], runOptions: { model: 'sonnet' } }))).toBe('sonnet · effort max')
     cleanup()
     expect(modelFact(makeMission({ rounds: [], runOptions: { model: '', effort: '' } }))).toBe('default · effort default')
+  })
+
+  it('names the Cursor model with no effort before a Cursor review starts', () => {
+    const cursor = defaultSettings({ reviewerEngine: 'cursor', cursorModel: '' })
+    expect(modelFact(makeMission({ rounds: [], runOptions: { model: 'gpt-5.2' } }), undefined, cursor)).toBe('gpt-5.2')
   })
 
   it('leaves the fact out for a round saved before models were recorded', () => {
