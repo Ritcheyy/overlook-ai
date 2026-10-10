@@ -32,6 +32,8 @@ export const CURSOR_CONFIG_DIR = '.cursor'
 export const CURSOR_ASIDE_DIR = '.cursor.overlook-aside'
 
 const THINKING_PREVIEW_CHARS = 100
+/** Reasoning streams in small deltas; a line goes out per stretch, or per this many characters of a long one. */
+const THINKING_FLUSH_CHARS = 500
 
 export interface CursorFs {
   access(path: string): Promise<void>
@@ -109,6 +111,32 @@ export function cursorActivities(event: Record<string, unknown>, worktreePath: s
   const payload = call[key]
   const args = isRecord(payload) && isRecord(payload['args']) ? payload['args'] : {}
   return [toolActivity(key.slice(0, -'ToolCall'.length), args, worktreePath)]
+}
+
+/**
+ * Turns the event stream into activity, joining the `thinking` deltas the
+ * model emits while it reasons so a long stretch still moves the HUD.
+ */
+export class CursorActivityMapper {
+  private thinking = ''
+
+  constructor(private readonly worktreePath: string) {}
+
+  activities(event: Record<string, unknown>): ActivityLite[] {
+    if (event['type'] !== 'thinking') return cursorActivities(event, this.worktreePath)
+    if (event['subtype'] === 'delta') {
+      this.thinking += str(event['text'])
+      return this.thinking.length >= THINKING_FLUSH_CHARS ? this.flush() : []
+    }
+    if (event['subtype'] === 'completed') return this.flush()
+    return []
+  }
+
+  private flush(): ActivityLite[] {
+    const text = this.thinking.replace(/\s+/g, ' ').trim()
+    this.thinking = ''
+    return text ? [{ kind: 'thinking', text: text.slice(0, THINKING_PREVIEW_CHARS) }] : []
+  }
 }
 
 async function exists(fs: CursorFs, path: string): Promise<boolean> {
@@ -193,6 +221,7 @@ export class CursorCliRunner implements RunnerPort {
     let outcome: { ok: ReviewResult } | { err: Error } | undefined
     let model: string | undefined
     const emit = (a: ActivityLite) => req.onActivity?.(a)
+    const mapper = new CursorActivityMapper(req.worktreePath)
 
     const onEvent = (event: Record<string, unknown>) => {
       if (event['type'] === 'result') {
@@ -209,7 +238,7 @@ export class CursorCliRunner implements RunnerPort {
         model = cursorInitModel(event)
         if (model) req.onModel?.(model)
       }
-      for (const a of cursorActivities(event, req.worktreePath)) emit(a)
+      for (const a of mapper.activities(event)) emit(a)
     }
 
     const run = driveStreamJson(child, { command, prompt, signal: req.signal, timeoutMs: this.timeoutMs, killGraceMs: this.killGraceMs, onEvent })

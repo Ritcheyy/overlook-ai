@@ -3,7 +3,7 @@ import type { Activity } from '@core/domain'
 import { defaultSettings } from '@core/loadouts'
 import type { ReviewRequest } from '@core/ports'
 import { PREV_SHA, makeRequest, makeRound, makeWorkspace } from '@core/review/test-helpers'
-import { CURSOR_ASIDE_DIR, CURSOR_PERMISSIONS, CursorCliRunner, buildCursorArgs, cursorActivities, type CursorCliRunnerOptions, type CursorFs } from './cursor-cli'
+import { CURSOR_ASIDE_DIR, CURSOR_PERMISSIONS, CursorActivityMapper, CursorCliRunner, buildCursorArgs, cursorActivities, type CursorCliRunnerOptions, type CursorFs } from './cursor-cli'
 import type { ExecFn, ExecResult } from './exec'
 import { fakeSpawn, line, type FakeChild } from './test-helpers'
 
@@ -40,7 +40,9 @@ const resultLine = (overrides: Record<string, unknown> = {}) =>
 function successScript(child: FakeChild): void {
   child.stdout.write(line({ type: 'system', subtype: 'init', apiKeySource: 'login', cwd: WORKTREE, session_id: 's1', model: 'Auto', permissionMode: 'default' }))
   child.stdout.write(line({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'prompt' }] }, session_id: 's1' }))
-  child.stdout.write(line({ type: 'thinking', subtype: 'delta', text: 'I will ', session_id: 's1' }))
+  child.stdout.write(line({ type: 'thinking', subtype: 'delta', text: 'I will read ', session_id: 's1' }))
+  child.stdout.write(line({ type: 'thinking', subtype: 'delta', text: 'the diff first.', session_id: 's1' }))
+  child.stdout.write(line({ type: 'thinking', subtype: 'completed', session_id: 's1' }))
   child.stdout.write(assistant("  I'll start with   the diff.  "))
   child.stdout.write(toolStarted('readToolCall', { path: `${WORKTREE}/src/a.ts` }))
   child.stdout.write(toolCompleted('readToolCall', { path: `${WORKTREE}/src/a.ts` }, { success: { content: 'x', totalLines: 1 } }))
@@ -152,6 +154,7 @@ describe('CursorCliRunner', () => {
     expect(models).toEqual(['Auto'])
     expect(activity).toEqual([
       { kind: 'thinking', text: 'Starting Cursor' },
+      { kind: 'thinking', text: 'I will read the diff first.' },
       { kind: 'thinking', text: "I'll start with the diff." },
       { kind: 'reading', text: 'src/a.ts' },
       { kind: 'running', text: 'git diff HEAD~1 --stat' },
@@ -168,6 +171,20 @@ describe('CursorCliRunner', () => {
     expect(result.durationMs).toBe(26_808)
     expect(result.costUsd).toBeUndefined()
     expect(result.rawOutput).toContain('"summary":"One bug."')
+  })
+
+  it('turns a long stretch of reasoning into a line every few hundred characters, and the rest when it completes', () => {
+    const mapper = new CursorActivityMapper(WORKTREE)
+    const delta = (text: string) => mapper.activities({ type: 'thinking', subtype: 'delta', text })
+    expect(delta('Checking the loop bound. ')).toEqual([])
+    const burst = delta('x'.repeat(480))
+    expect(burst).toHaveLength(1)
+    expect(burst[0]).toMatchObject({ kind: 'thinking' })
+    expect(burst[0].text).toHaveLength(100)
+    expect(burst[0].text.startsWith('Checking the loop bound. xxx')).toBe(true)
+    expect(delta('  Done ')).toEqual([])
+    expect(mapper.activities({ type: 'thinking', subtype: 'completed' })).toEqual([{ kind: 'thinking', text: 'Done' }])
+    expect(mapper.activities({ type: 'thinking', subtype: 'completed' })).toEqual([])
   })
 
   it('ignores events without a tool payload', () => {
