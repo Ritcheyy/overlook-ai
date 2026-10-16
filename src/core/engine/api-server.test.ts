@@ -600,6 +600,29 @@ describe('engine', () => {
     expect((await h.api.getSnapshot()).ignoredPrs).toEqual({})
   })
 
+  it('keeps notifications in the snapshot until dismissed, newest last and capped', async () => {
+    const h = await makeEngine()
+    const pr = h.github.simulateNewPullRequest()
+    await h.api.refreshInbox()
+    let snap = await h.api.getSnapshot()
+    expect(snap.notifications).toHaveLength(1)
+    expect(snap.notifications[0]).toMatchObject({ title: `New PR: checkout-api #${pr.number}`, prId: pr.id, at: expect.any(String) })
+    await h.api.dismissNotification(snap.notifications[0].id)
+    snap = await h.api.getSnapshot()
+    expect(snap.notifications).toEqual([])
+
+    for (let i = 0; i < 25; i++) {
+      h.github.simulateNewPullRequest()
+      await h.api.refreshInbox()
+    }
+    snap = await h.api.getSnapshot()
+    expect(snap.notifications).toHaveLength(20)
+    expect(snap.notifications.at(-1)?.title).toBe(h.notifier.notifications.at(-1)?.title)
+    await h.engine.stop()
+    live.splice(live.indexOf(h), 1)
+    expect(h.store.state && 'notifications' in h.store.state).toBe(false)
+  })
+
   it('offers Retry on a failed review and Open triage when findings are ready', async () => {
     const h = await makeEngine()
     h.runner.inner.failNext = true

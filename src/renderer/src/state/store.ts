@@ -5,7 +5,7 @@
  * snapshot after every change, so no optimistic updates are needed.
  */
 import { create } from 'zustand'
-import type { Activity, AppSnapshot, Mission, MissionState, Notification, NotificationAction, PullRequest, Slot } from '@core/domain'
+import type { Activity, AppSnapshot, Mission, MissionState, NotificationAction, PendingNotification, PullRequest, Slot } from '@core/domain'
 import { missionHoldsSlot } from '@core/domain'
 import { api, onPush } from '@/lib/api'
 
@@ -142,9 +142,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (n.screen === 'triage' && (n.missionId || n.prId)) get().openDetails({ missionId: n.missionId, prId: n.prId })
       else set({ screen: n.screen, selectedMissionId: n.missionId ?? get().selectedMissionId })
     })
-    onPush('notification', (n: Notification) => {
-      get().pushToast({ kind: 'info', title: n.title, body: n.body, missionId: n.missionId, prId: n.prId, actions: n.actions })
-    })
+    // Notifications arrive in the snapshot and stay until dismissed; the push alone would vanish with a glance away.
     await get().refresh()
   }
 }))
@@ -190,6 +188,8 @@ export const selectMissions = (s: AppState): Mission[] => s.snapshot?.missions ?
 export const selectInbox = (s: AppState): PullRequest[] => s.snapshot?.inbox ?? EMPTY_INBOX
 const EMPTY_IGNORED: Record<string, string> = {}
 export const selectIgnoredPrs = (s: AppState): Record<string, string> => s.snapshot?.ignoredPrs ?? EMPTY_IGNORED
+const EMPTY_NOTIFICATIONS: PendingNotification[] = []
+export const selectNotifications = (s: AppState): PendingNotification[] => s.snapshot?.notifications ?? EMPTY_NOTIFICATIONS
 
 export const selectMissionById = (id?: string) => (s: AppState) =>
   id ? s.snapshot?.missions.find((m) => m.id === id) : undefined
