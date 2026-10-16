@@ -30,12 +30,15 @@ import type {
 import type { Ports, WorkspaceContext } from '../ports'
 import { buildComment } from '../comment-builder'
 import { expandHome, parsePrId, worktreePathFor } from './paths'
+import { OPEN, RETRY } from '../notifications'
 import { applyRunOptions, runBudgetUsd, runEffort, runModel, sanitizeRunOptions, trimReplies } from './run-options'
 import { buildWorkspaceContext, describeWorkspaceContext, workspaceFor } from './workspaces'
 
 export interface EngineState {
   settings: Settings
   inbox: PullRequest[]
+  /** PRs hidden from the Inbox, by id, with the head they were hidden at. */
+  ignoredPrs: Record<string, string>
   missions: Mission[]
   slots: Slot[]
   localRepos: LocalRepo[]
@@ -412,7 +415,8 @@ export class Scheduler {
         this.notify({
           title: `Findings ready: #${pr.number} ${pr.title}`,
           body: `${countFindings(round.findings.length)} from ${this.slotName(mission)}`,
-          missionId: mission.id
+          missionId: mission.id,
+          actions: [{ id: 'open', label: 'Open triage' }]
         })
       }
     } catch (e) {
@@ -440,7 +444,7 @@ export class Scheduler {
       }
       this.transition(mission, 'failed', message)
       if (!cancelled) {
-        this.notify({ title: `Review failed: #${mission.pr.number}`, body: message, missionId: mission.id })
+        this.notify({ title: `Review failed: #${mission.pr.number}`, body: message, missionId: mission.id, actions: [RETRY, OPEN] })
       }
     } finally {
       if (this.controllers.get(mission.id) === controller) this.controllers.delete(mission.id)
@@ -513,7 +517,7 @@ export class Scheduler {
       if (mission.state === 'posting') {
         mission.error = `Posting failed: ${message}`
         this.transition(mission, 'needs_you', 'posting failed')
-        this.notify({ title: `Posting failed: #${pr.number}`, body: message, missionId: mission.id })
+        this.notify({ title: `Posting failed: #${pr.number}`, body: message, missionId: mission.id, actions: [OPEN] })
       }
       throw e
     }

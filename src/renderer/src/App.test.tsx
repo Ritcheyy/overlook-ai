@@ -66,6 +66,7 @@ function mission(prIndex: number, state: Mission['state'], extra: Partial<Missio
 const settings = defaultSettings()
 const snapshot: AppSnapshot = {
   inbox: prs,
+  ignoredPrs: {},
   missions: [
     mission(0, 'needs_you', { slotId: 'slot-1', rounds: [round(prs[0].id, 1)], stale: true }),
     mission(1, 'failed', { preferredSlotId: 'slot-2', error: 'git fetch failed: could not read from remote', rounds: [round(prs[1].id, 1)] }),

@@ -9,6 +9,7 @@ import type {
   LocalRepo,
   Loadout,
   Mission,
+  Notification,
   PrComment,
   PullRequest,
   RawFinding,
@@ -117,6 +118,7 @@ export interface PersistedState {
   missions: Mission[]
   settings: Settings
   inbox: PullRequest[]
+  ignoredPrs?: Record<string, string>
   lastPollAt?: string
 }
 
@@ -126,7 +128,7 @@ export interface StorePort {
 }
 
 export interface NotifierPort {
-  notify(n: { title: string; body: string; missionId?: string }): void
+  notify(n: Notification): void
   setBadge(count: number): void
 }
 

@@ -8,6 +8,8 @@ import { seedPullRequests } from '@core/demo/seed'
 vi.mock('@/lib/api', () => ({
   api: {
     dispatch: vi.fn(async () => ({})),
+    ignorePullRequest: vi.fn(async () => {}),
+    unignorePullRequest: vi.fn(async () => {}),
     openExternal: vi.fn(async () => {}),
     refreshInbox: vi.fn(async () => ({}))
   },
@@ -41,6 +43,7 @@ function buildSnapshot(): AppSnapshot {
   }
   return {
     inbox,
+    ignoredPrs: {},
     missions: [mission],
     slots: settings.slots,
     settings,
@@ -118,5 +121,30 @@ describe('InboxScreen', () => {
     render(<InboxScreen />)
     fireEvent.click(screen.getByRole('button', { name: 'Poll GitHub now' }))
     await waitFor(() => expect(useAppStore.getState().toasts.some((t) => t.kind === 'error' && t.body === 'gh: not logged in')).toBe(true))
+  })
+})
+
+describe('InboxScreen ignored PRs', () => {
+  it('hides an ignored PR behind its own filter, brings it back with Show again, and ignores from the row', () => {
+    const snapshot = buildSnapshot()
+    const reviewed = new Set(snapshot.missions.map((m) => m.prId))
+    const [target, other] = snapshot.inbox.filter((p) => !p.mine && !reviewed.has(p.id))
+    snapshot.ignoredPrs = { [target.id]: target.headSha }
+    useAppStore.setState({ snapshot, loading: false, screen: 'inbox' })
+    render(<InboxScreen />)
+    expect(screen.queryByText(target.title)).toBeNull()
+    expect(screen.getAllByRole('listitem')).toHaveLength(5)
+
+    const filter = screen.getByRole('group', { name: 'Filter pull requests' })
+    expect(within(filter).getByRole('button', { name: /^Ignored/ }).textContent).toContain('1')
+    fireEvent.click(within(filter).getByRole('button', { name: /^Ignored/ }))
+    expect(screen.getAllByRole('listitem')).toHaveLength(1)
+    expect(screen.getByText(target.title)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Show again' }))
+    expect(api.unignorePullRequest).toHaveBeenCalledWith(target.id)
+
+    fireEvent.click(within(filter).getByRole('button', { name: /^All/ }))
+    fireEvent.click(screen.getByRole('button', { name: `Ignore #${other.number} until the next push` }))
+    expect(api.ignorePullRequest).toHaveBeenCalledWith(other.id)
   })
 })

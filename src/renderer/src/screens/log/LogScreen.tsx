@@ -15,6 +15,7 @@ import { Chip } from '@/components/ui/Chip'
 import { ConfirmButton } from '@/components/ui/ConfirmButton'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { IconButton } from '@/components/ui/IconButton'
+import { RepoBadge } from '@/components/app/RepoBadge'
 import { RoundDetails } from '@/components/app/RoundDetails'
 import { MISSION_STATES, MISSION_STATE_META, StateChip } from '@/components/app/StateChip'
 import { GitHubDecision, VerdictLabel } from '@/components/app/PrMarkers'
@@ -60,12 +61,11 @@ function LogRow({ mission, selected, now, onOpen, onClose }: { mission: Mission;
     >
       <td className={cn(TD, 'max-w-[380px] !whitespace-normal')}>
         <div className="flex min-w-0 items-center gap-2">
-          <span className="shrink-0 font-mono text-[11.5px] text-faint">#{mission.pr.number}</span>
+          <RepoBadge repo={mission.pr.repo} number={mission.pr.number} className="shrink-0" />
           <span className="min-w-0 truncate text-[12.5px] text-ink" title={mission.pr.title}>
             {mission.pr.title}
           </span>
         </div>
-        <div className="mt-0.5 text-[11px] text-faint">{mission.pr.repo.fullName}</div>
       </td>
       <td className={TD}>
         {slot ? (

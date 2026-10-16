@@ -1,11 +1,12 @@
 import { useCallback, useRef, useState } from 'react'
-import { Folder, FolderGit2, GitBranch, Github, MoreHorizontal, X } from 'lucide-react'
+import { Folder, GitBranch, Github, MoreHorizontal, X } from 'lucide-react'
 import type { Mission, PullRequest } from '@core/domain'
 import { api } from '@/lib/api'
 import { plural, relativeTime } from '@/lib/format'
 import { Chip } from '@/components/ui/Chip'
 import { Dropdown, MenuItem } from '@/components/ui/Dropdown'
 import { IconButton } from '@/components/ui/IconButton'
+import { RepoBadge } from '@/components/app/RepoBadge'
 import { StateChip } from '@/components/app/StateChip'
 import { GitHubDecision } from '@/components/app/PrMarkers'
 import { useMissionActions } from './useMissionActions'
@@ -87,12 +88,8 @@ export function PrHeader({ pr, mission, now }: PrHeaderProps) {
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-muted">
-            <FolderGit2 className="h-3.5 w-3.5 text-faint" aria-hidden />
-            <span>
-              <span className="text-faint">{pr.repo.owner}/</span>
-              <span className="font-medium text-ink">{pr.repo.name}</span>
-            </span>
-            <span className="font-mono text-faint">#{pr.number}</span>
+            <RepoBadge repo={pr.repo} number={pr.number} size="sm" />
+            <span className="text-faint">{pr.repo.owner}</span>
             {mission ? <StateChip state={mission.state} /> : <Chip tone="faint">Not reviewed</Chip>}
             {pr.isDraft && <Chip tone="faint">Draft</Chip>}
             <GitHubDecision decision={pr.reviewDecision} />

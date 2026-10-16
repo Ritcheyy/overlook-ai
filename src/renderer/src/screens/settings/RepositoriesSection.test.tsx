@@ -23,6 +23,7 @@ const NOW = new Date('2026-09-13T12:00:00Z')
 function buildSnapshot(settings: Settings): AppSnapshot {
   return {
     inbox: seedPullRequests(NOW),
+    ignoredPrs: {},
     missions: [],
     slots: settings.slots,
     settings,

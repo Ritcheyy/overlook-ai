@@ -9,7 +9,8 @@ import { homedir } from 'node:os'
 import { createEngine } from '@core/engine/api-server'
 import type { Settings } from '@core/domain'
 import { persistedDemoSeed } from '@core/demo/engine'
-import type { Engine, NavigateArgs } from '@core/ipc-contract'
+import type { Api, Engine, NavigateArgs } from '@core/ipc-contract'
+import { notificationTarget, performNotificationAction } from '@core/notifications'
 import type { NotifierPort, Ports } from '@core/ports'
 import { systemClock } from '@core/ports'
 import { defaultSettings } from '@core/loadouts'
@@ -33,21 +34,36 @@ import { showMainWindow } from './window'
 /** A new window subscribes to pushes once React has mounted, a beat after its load event. */
 const NAVIGATE_AFTER_LOAD_MS = 300
 
-function electronNotifier(): NotifierPort {
+function navigateTo(target: NavigateArgs): void {
+  const { win, created } = showMainWindow()
+  if (!created) {
+    broadcast('navigate', target)
+    return
+  }
+  win.webContents.once('did-finish-load', () => {
+    setTimeout(() => broadcast('navigate', target), NAVIGATE_AFTER_LOAD_MS)
+  })
+}
+
+/** The engine comes after the ports, so the notifier reaches its API through a getter. */
+function electronNotifier(getApi: () => Api | undefined): NotifierPort {
   return {
     notify(n) {
       if (!Notification.isSupported()) return
-      const note = new Notification({ title: n.title, body: n.body })
-      note.on('click', () => {
-        const target: NavigateArgs = n.missionId ? { screen: 'triage', missionId: n.missionId } : { screen: 'floor' }
-        const { win, created } = showMainWindow()
-        if (!created) {
-          broadcast('navigate', target)
-          return
-        }
-        win.webContents.once('did-finish-load', () => {
-          setTimeout(() => broadcast('navigate', target), NAVIGATE_AFTER_LOAD_MS)
-        })
+      const actions = n.actions ?? []
+      const note = new Notification({ title: n.title, body: n.body, actions: actions.map((a) => ({ type: 'button', text: a.label })) })
+      note.on('click', () => navigateTo(notificationTarget(n)))
+      note.on('action', (_event, index) => {
+        const action = actions[index]
+        const api = getApi()
+        if (!action || !api) return
+        performNotificationAction(api, n, action.id)
+          .then((target) => {
+            if (target) navigateTo(target)
+          })
+          .catch((e: Error) => {
+            new Notification({ title: `${action.label} failed`, body: e.message }).show()
+          })
       })
       note.show()
     },
@@ -80,15 +96,17 @@ export async function bootstrap(): Promise<Engine> {
     updatedSince: updatedSince(current, systemClock.now())?.toISOString().slice(0, 10)
   })
 
+  let api: Api | undefined
+  const notifier = electronNotifier(() => api)
   const ports: Ports = demo
-    ? { github, worktree, runner, repos: new MockRepos(), store, notifier: electronNotifier(), clock: systemClock }
+    ? { github, worktree, runner, repos: new MockRepos(), store, notifier, clock: systemClock }
     : {
         github: new GhCliGitHub({ filter: searchFilter }),
         worktree: new GitWorktree(),
         runner: new EngineRunner({ claude: new ClaudeCliRunner(), cursor: new CursorCliRunner() }),
         repos: new RepoDiscovery(),
         store,
-        notifier: electronNotifier(),
+        notifier,
         clock: systemClock
       }
 
@@ -118,6 +136,7 @@ export async function bootstrap(): Promise<Engine> {
         }
       : undefined
   })
+  api = engine.api
   engine.subscribe('snapshot', (snap) => {
     current = snap.settings
   })
