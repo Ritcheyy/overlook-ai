@@ -65,9 +65,9 @@ Review the delta by hand from the status line at any time; a manual round is als
 
 ## Notifications
 
-Every notification carries its next step: Review now and Ignore on a new review request, Open triage when findings are ready, Review the delta or Review again after a push or a reply, Retry after a failure. The same buttons appear on the in-app toast at the bottom right, so they work even where macOS hides them.
+Every notification carries its next step. The macOS notification shows one button when you hover over it: Review now on a new review request, Open triage when findings are ready, Review the delta or Review again after a push or a reply, Retry after a failure. macOS only reveals notification buttons on hover, and folds two or more into an Options menu, which is why the notification carries one. The in-app toast at the bottom right shows every action, Ignore included.
 
-macOS shows the buttons on a notification only when Overlook's style is Alerts, which the packaged app asks for. If a notification shows no buttons, set System Settings > Notifications > Overlook to Alerts; as a Banner the buttons sit behind the hover menu.
+The packaged app asks macOS for the persistent alert style so a notification waits until you deal with it; System Settings > Notifications > Overlook can change that.
 
 A new PR is announced the first time it appears in the Inbox from someone else. Your own PRs and drafts stay quiet; a draft is announced when it is marked ready. More than five new PRs in one poll become a single summary, as after a week away or switching a repo on. The first poll after a fresh install announces nothing.
 

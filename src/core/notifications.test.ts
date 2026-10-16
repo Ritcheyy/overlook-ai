@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { makeMission, makePr } from './review/test-helpers'
-import { newPullRequestNotification, newPullRequestsSummary, notificationTarget, performNotificationAction, type NotificationApi } from './notifications'
+import { newPullRequestNotification, newPullRequestsSummary, notificationTarget, osNotificationActions, performNotificationAction, type NotificationApi } from './notifications'
 
 describe('performNotificationAction', () => {
   it('runs the API call behind each button and says where to go afterwards', async () => {
@@ -35,6 +35,15 @@ describe('performNotificationAction', () => {
 
   it('sends a notification about nothing in particular to the Inbox', () => {
     expect(notificationTarget({})).toEqual({ screen: 'inbox' })
+  })
+
+  it('gives the OS notification its main action only', () => {
+    const actions = [
+      { id: 'review' as const, label: 'Review now' },
+      { id: 'ignore' as const, label: 'Ignore' }
+    ]
+    expect(osNotificationActions({ actions })).toEqual([actions[0]])
+    expect(osNotificationActions({})).toEqual([])
   })
 })
 

@@ -40,6 +40,15 @@ export function newPullRequestsSummary(prs: readonly PullRequest[]): Notificatio
   }
 }
 
+/**
+ * What the OS notification offers: its main action only. macOS shows one
+ * action as a button on hover but folds two or more into an Options menu,
+ * which costs an extra click; the in-app toast keeps the rest.
+ */
+export function osNotificationActions(n: Pick<Notification, 'actions'>): NotificationAction[] {
+  return (n.actions ?? []).slice(0, 1)
+}
+
 /** Where clicking the notification itself goes. */
 export function notificationTarget(n: Pick<Notification, 'missionId' | 'prId'>): NavigateArgs {
   if (n.missionId) return { screen: 'triage', missionId: n.missionId }
