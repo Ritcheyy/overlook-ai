@@ -4,6 +4,7 @@ import { latestRound, repoRefFromFullName } from '../domain'
 import type { Api, Engine } from '../ipc-contract'
 import type { PersistedState, ReviewRequest, ReviewResult, RunnerPort } from '../ports'
 import { RETIRED_SLASH_COMMANDS, defaultSettings } from '../loadouts'
+import { NEW_PR_BURST, OPEN, RETRY, rerun } from '../notifications'
 import { createEngine } from './api-server'
 import { MockGitHub } from '../mocks/github'
 import { DEMO_WORKSPACE_NOTES, DEMO_WORKSPACE_ROOT, FakeClock, MockNotifier, MockRepos, defaultDemoRepos } from '../mocks/misc'
@@ -532,6 +533,84 @@ describe('engine', () => {
     expect(snapshot.settings).toMatchObject({ reviewerEngine: 'claude', cursorPath: 'agent', cursorModel: '', claudeModel: 'opus' })
   })
 
+  it('announces a new PR from someone else once, with its size and two actions, but never on the first poll', async () => {
+    const h = await makeEngine()
+    expect(h.notifier.notifications.filter((n) => n.title.startsWith('New PR'))).toHaveLength(0)
+    const before = h.notifier.notifications.length
+    const pr = h.github.simulateNewPullRequest({ title: 'feat: gift cards', additions: 120, deletions: 8, changedFiles: 5 })
+    await h.api.refreshInbox()
+    expect(h.notifier.notifications.slice(before)).toEqual([
+      {
+        title: `New PR: checkout-api #${pr.number}`,
+        body: 'feat: gift cards\n@mariam-dev · +120 −8 · 5 files',
+        prId: pr.id,
+        actions: [
+          { id: 'review', label: 'Review now' },
+          { id: 'ignore', label: 'Ignore' }
+        ]
+      }
+    ])
+    await h.api.refreshInbox()
+    expect(h.notifier.notifications).toHaveLength(before + 1)
+  })
+
+  it('keeps quiet about my own PRs and drafts, and announces a draft once it is ready', async () => {
+    const h = await makeEngine()
+    const before = h.notifier.notifications.length
+    h.github.simulateNewPullRequest({ mine: true, reviewRequested: false })
+    const draft = h.github.simulateNewPullRequest({ isDraft: true })
+    await h.api.refreshInbox()
+    expect(h.notifier.notifications).toHaveLength(before)
+    h.github.simulateReady(draft.id)
+    await h.api.refreshInbox()
+    expect(h.notifier.notifications.slice(before).map((n) => n.title)).toEqual([`New PR: checkout-api #${draft.number}`])
+  })
+
+  it('sums up a burst of new PRs instead of announcing each', async () => {
+    const h = await makeEngine()
+    const before = h.notifier.notifications.length
+    for (let i = 0; i <= NEW_PR_BURST; i++) h.github.simulateNewPullRequest()
+    await h.api.refreshInbox()
+    expect(h.notifier.notifications.slice(before)).toEqual([{ title: `${NEW_PR_BURST + 1} new PRs in the Inbox`, body: 'All in checkout-api.' }])
+  })
+
+  it('ignores a PR until its author pushes, keeps it in the snapshot for the Ignored filter, and persists it', async () => {
+    const h = await makeEngine()
+    const pr = h.github.simulateNewPullRequest()
+    await h.api.refreshInbox()
+    await expect(h.api.ignorePullRequest('acme/checkout-api#1')).rejects.toThrow('not in the Inbox')
+    await h.api.ignorePullRequest(pr.id)
+    let snap = await h.api.getSnapshot()
+    expect(snap.ignoredPrs).toEqual({ [pr.id]: pr.headSha })
+    expect(snap.inbox.some((p) => p.id === pr.id)).toBe(true)
+    await h.api.refreshInbox()
+    expect((await h.api.getSnapshot()).ignoredPrs).toEqual({ [pr.id]: pr.headSha })
+    await sleep(300)
+    expect(h.store.state?.ignoredPrs).toEqual({ [pr.id]: pr.headSha })
+
+    const announced = h.notifier.notifications.length
+    h.github.simulatePush(pr.id)
+    await h.api.refreshInbox()
+    snap = await h.api.getSnapshot()
+    expect(snap.ignoredPrs).toEqual({})
+    expect(h.notifier.notifications).toHaveLength(announced)
+
+    await h.api.ignorePullRequest(pr.id)
+    await h.api.unignorePullRequest(pr.id)
+    expect((await h.api.getSnapshot()).ignoredPrs).toEqual({})
+  })
+
+  it('offers Retry on a failed review and Open triage when findings are ready', async () => {
+    const h = await makeEngine()
+    h.runner.inner.failNext = true
+    const a = await h.api.dispatch({ prId: PR_412 })
+    await waitForState(h, a.id, 'failed')
+    expect(h.notifier.notifications.at(-1)).toMatchObject({ title: 'Review failed: #412', missionId: a.id, actions: [RETRY, OPEN] })
+    const b = await h.api.dispatch({ prId: PR_1203 })
+    await waitForState(h, b.id, 'needs_you')
+    expect(h.notifier.notifications.at(-1)).toMatchObject({ missionId: b.id, actions: [{ id: 'open', label: 'Open triage' }] })
+  })
+
   it('records the model the runner reports while the review is still running', async () => {
     const h = await makeEngine({ settings: { claudeModel: 'opus' } })
     h.runner.block = true
@@ -925,7 +1004,7 @@ describe('engine', () => {
     expect(h.store.saves).toBeGreaterThan(savesAfterStart)
     expect(h.store.saves - savesAfterStart).toBeLessThan(4)
     expect(h.store.state?.missions[0].state).toBe('needs_you')
-    expect(Object.keys(h.store.state ?? {}).sort()).toEqual(['inbox', 'lastPollAt', 'missions', 'settings'])
+    expect(Object.keys(h.store.state ?? {}).sort()).toEqual(['ignoredPrs', 'inbox', 'lastPollAt', 'missions', 'settings'])
     await h.engine.stop()
     live.splice(live.indexOf(h), 1)
     expect(h.store.state?.missions[0].state).toBe('needs_you')
@@ -1284,7 +1363,8 @@ describe('engine', () => {
     expect(h.notifier.notifications[h.notifier.notifications.length - 1]).toEqual({
       title: 'New push on #412',
       body: 'The automatic follow-up limit (1) is reached. Re-run when ready.',
-      missionId: a.id
+      missionId: a.id,
+      actions: [rerun('Review the delta'), OPEN]
     })
     expect(h.runner.calls).toHaveLength(2)
 
@@ -1335,7 +1415,8 @@ describe('engine', () => {
     expect(h.notifier.notifications[h.notifier.notifications.length - 1]).toEqual({
       title: 'New push on #412',
       body: 'Automatic follow-ups are off for this review. Re-run when ready.',
-      missionId: a.id
+      missionId: a.id,
+      actions: [rerun('Review the delta'), OPEN]
     })
 
     await h.api.setAutoFollowUp({ missionId: a.id, enabled: true })
@@ -1660,7 +1741,7 @@ describe('engine', () => {
     await first.api.checkEnvironment()
     await first.engine.stop()
     live.splice(live.indexOf(first), 1)
-    expect(Object.keys(first.store.state ?? {}).sort()).toEqual(['inbox', 'lastPollAt', 'missions', 'settings'])
+    expect(Object.keys(first.store.state ?? {}).sort()).toEqual(['ignoredPrs', 'inbox', 'lastPollAt', 'missions', 'settings'])
 
     const second = await makeEngine({ store: new MemoryStore(first.store.state) })
     const snap = await second.api.getSnapshot()
@@ -1800,7 +1881,8 @@ describe('engine', () => {
     expect(h.notifier.notifications[h.notifier.notifications.length - 1]).toEqual({
       title: 'dami-codes replied on #412',
       body: 'No new commits yet, so no follow-up has started.',
-      missionId: a.id
+      missionId: a.id,
+      actions: [rerun('Review again'), OPEN]
     })
     const count = h.notifier.notifications.length
     await h.api.refreshInbox()

@@ -5,7 +5,7 @@
  * snapshot after every change, so no optimistic updates are needed.
  */
 import { create } from 'zustand'
-import type { Activity, AppSnapshot, Mission, MissionState, Notification, PullRequest, Slot } from '@core/domain'
+import type { Activity, AppSnapshot, Mission, MissionState, Notification, NotificationAction, PullRequest, Slot } from '@core/domain'
 import { missionHoldsSlot } from '@core/domain'
 import { api, onPush } from '@/lib/api'
 
@@ -29,8 +29,16 @@ export interface Toast {
   title: string
   body?: string
   missionId?: string
+  prId?: string
+  /** Buttons under the text; the ones a notification carries. */
+  actions?: NotificationAction[]
   createdAt: number
 }
+
+const TOAST_MS = 5000
+const ERROR_TOAST_MS = 9000
+/** Long enough to read the options and press one. */
+const ACTIONABLE_TOAST_MS = 12_000
 
 const MAX_ACTIVITY = 120
 
@@ -105,7 +113,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   pushToast: (toast) => {
     const id = `toast-${++toastSeq}`
     set((s) => ({ toasts: [...s.toasts, { ...toast, id, createdAt: Date.now() }] }))
-    setTimeout(() => get().dismissToast(id), toast.kind === 'error' ? 9000 : 5000)
+    setTimeout(() => get().dismissToast(id), toast.actions?.length ? ACTIONABLE_TOAST_MS : toast.kind === 'error' ? ERROR_TOAST_MS : TOAST_MS)
   },
 
   dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
@@ -131,11 +139,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       })
     )
     onPush('navigate', (n) => {
-      if (n.screen === 'triage' && n.missionId) get().openDetails({ missionId: n.missionId })
+      if (n.screen === 'triage' && (n.missionId || n.prId)) get().openDetails({ missionId: n.missionId, prId: n.prId })
       else set({ screen: n.screen, selectedMissionId: n.missionId ?? get().selectedMissionId })
     })
     onPush('notification', (n: Notification) => {
-      get().pushToast({ kind: 'info', title: n.title, body: n.body, missionId: n.missionId })
+      get().pushToast({ kind: 'info', title: n.title, body: n.body, missionId: n.missionId, prId: n.prId, actions: n.actions })
     })
     await get().refresh()
   }
@@ -180,6 +188,8 @@ export const selectSettings = (s: AppState) => s.snapshot?.settings
 export const selectSlots = (s: AppState): Slot[] => s.snapshot?.slots ?? EMPTY_SLOTS
 export const selectMissions = (s: AppState): Mission[] => s.snapshot?.missions ?? EMPTY_MISSIONS
 export const selectInbox = (s: AppState): PullRequest[] => s.snapshot?.inbox ?? EMPTY_INBOX
+const EMPTY_IGNORED: Record<string, string> = {}
+export const selectIgnoredPrs = (s: AppState): Record<string, string> => s.snapshot?.ignoredPrs ?? EMPTY_IGNORED
 
 export const selectMissionById = (id?: string) => (s: AppState) =>
   id ? s.snapshot?.missions.find((m) => m.id === id) : undefined

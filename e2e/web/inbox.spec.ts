@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { VIEWPORT, errorsOn, goTo, inboxRow, openApp, screenshot } from './ui'
+import { VIEWPORT, demoAction, errorsOn, goTo, inboxRow, openApp, screenshot } from './ui'
 
 test.use({ viewport: VIEWPORT })
 
@@ -9,6 +9,25 @@ const SEED: { repo: string; numbers: number[] }[] = [
   { repo: 'acme/notifications-service', numbers: [58] },
   { repo: 'acme/storefront-web', numbers: [1203, 1210] }
 ]
+
+test('a new review request is announced with Review now and Ignore; Ignore parks it under its own filter', async ({ page }) => {
+  await openApp(page)
+  await demoAction(page, 'New PR')
+  const toast = page.getByRole('status').filter({ hasText: /^New PR: checkout-api #9/ })
+  await expect(toast).toBeVisible()
+  await expect(toast).toContainText('+30 −4 · 2 files')
+  await expect(toast.getByRole('button', { name: 'Review now' })).toBeVisible()
+  await toast.getByRole('button', { name: 'Ignore' }).click()
+  await expect(toast).toHaveCount(0)
+  await goTo(page, 'Inbox')
+  await expect(page.getByText('6 pull requests', { exact: true })).toBeVisible()
+  const filter = page.getByRole('group', { name: 'Filter pull requests' })
+  await filter.getByRole('button', { name: /^Ignored/ }).click()
+  await expect(page.getByRole('listitem')).toHaveCount(1)
+  await page.getByRole('button', { name: 'Show again' }).click()
+  await expect(filter.getByRole('button', { name: /^Ignored/ })).toHaveCount(0)
+  await expect(page.getByText('7 pull requests', { exact: true })).toBeVisible()
+})
 
 test('lists the seed inbox grouped by repo, filters to mine, narrows by search, and opens a PR on a row click', async ({ page }) => {
   await openApp(page)

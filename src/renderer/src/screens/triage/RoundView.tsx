@@ -23,6 +23,27 @@ export function sortFindings(findings: Finding[]): Finding[] {
   return [...findings].sort((a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity))
 }
 
+/** Which round this is, what started it, the commits it covers and when; shown above the round and the side cards. */
+export function RoundMeta({ round, now }: { round: ReviewRound; now: number }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-faint">
+      <span className="font-medium text-muted">Round {round.index}</span>
+      {round.trigger && (
+        <>
+          <span aria-hidden>·</span>
+          <span>{TRIGGER_TEXT[round.trigger]}</span>
+        </>
+      )}
+      <span aria-hidden>·</span>
+      <span className="font-mono" title={round.headSha}>
+        {round.previousHeadSha ? `${shortSha(round.previousHeadSha)}..${shortSha(round.headSha)}` : shortSha(round.headSha)}
+      </span>
+      <span aria-hidden>·</span>
+      <span title={round.startedAt}>started {relativeTime(round.startedAt, now)}</span>
+    </div>
+  )
+}
+
 export function SectionLabel({ children }: { children: string }) {
   return <div className="text-[10.5px] font-semibold uppercase tracking-wider text-faint">{children}</div>
 }
@@ -204,21 +225,6 @@ export function RoundView({ mission, round, settings, triage, readOnly, now }: R
 
   return (
     <div className="flex flex-col gap-4" data-round={round.index}>
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-faint">
-        <span className="font-medium text-muted">Round {round.index}</span>
-        {round.trigger && (
-          <>
-            <span aria-hidden>·</span>
-            <span>{TRIGGER_TEXT[round.trigger]}</span>
-          </>
-        )}
-        <span aria-hidden>·</span>
-        <span className="font-mono" title={round.headSha}>
-          {round.previousHeadSha ? `${shortSha(round.previousHeadSha)}..${shortSha(round.headSha)}` : shortSha(round.headSha)}
-        </span>
-        <span aria-hidden>·</span>
-        <span title={round.startedAt}>started {relativeTime(round.startedAt, now)}</span>
-      </div>
       <RepliesCard round={round} />
       <BriefingCard round={round} title={round.previousHeadSha ? 'What changed' : undefined} />
       <SummaryCard mission={mission} round={round} editable={canEditSummary} />

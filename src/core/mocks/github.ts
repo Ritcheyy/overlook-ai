@@ -132,6 +132,15 @@ export class MockGitHub implements GitHubPort {
     return structuredClone(p)
   }
 
+  /** The author marks a draft ready for review. */
+  simulateReady(prId: string): PullRequest {
+    const p = this.prs.get(prId)
+    if (!p) throw new Error(`Unknown PR ${prId}`)
+    p.isDraft = false
+    p.updatedAt = this.clock.now().toISOString()
+    return structuredClone(p)
+  }
+
   simulateNewPullRequest(overrides: Partial<PullRequest> = {}): PullRequest {
     const fullName = overrides.repo?.fullName ?? 'acme/checkout-api'
     let number = 900 + ++this.counter

@@ -364,6 +364,8 @@ export const REVIEWER_ENGINE_LABELS: Record<ReviewerEngine, string> = { claude: 
 
 export interface AppSnapshot {
   inbox: PullRequest[]
+  /** PRs hidden from the Inbox by id, with the head they were hidden at; a push brings them back. */
+  ignoredPrs: Record<string, string>
   missions: Mission[]
   slots: Slot[]
   settings: Settings
@@ -401,10 +403,21 @@ export const ENVIRONMENT_CHECK_LABELS: Record<EnvironmentCheckId, string> = {
   worktreeRoot: 'Worktree root'
 }
 
+export type NotificationActionId = 'open' | 'review' | 'ignore' | 'rerun' | 'retry'
+
+export interface NotificationAction {
+  id: NotificationActionId
+  label: string
+}
+
 export type Notification = {
   title: string
   body: string
   missionId?: string
+  /** The PR it is about when no review exists yet, such as a new PR in the Inbox. */
+  prId?: string
+  /** Offered as buttons, the first one as the primary action. Clicking the notification itself opens the details. */
+  actions?: NotificationAction[]
 }
 
 export const SEVERITY_ORDER: readonly FindingSeverity[] = ['blocker', 'major', 'minor', 'nit', 'praise']

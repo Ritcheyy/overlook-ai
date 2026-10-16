@@ -7,6 +7,7 @@
 import type { Mission, MissionState, PrComment, PullRequest, Settings } from '../domain'
 import { autoRoundsUsed, commentIdOf, lastPostedRound, latestRound, shortSha } from '../domain'
 import type { GitHubPort, PullRequestDetail } from '../ports'
+import { NEW_PR_BURST, OPEN, newPullRequestNotification, newPullRequestsSummary, rerun } from '../notifications'
 import { trimReplies } from './run-options'
 import { errorMessage, type Scheduler } from './scheduler'
 
@@ -110,9 +111,39 @@ async function fetchMissionPrs(github: GitHubPort, missions: Mission[], listed: 
   return fetched
 }
 
+/** New PRs from other people, and drafts just marked ready. The first poll ever is a silent baseline. */
+async function announceNewPullRequests(sched: Scheduler, previous: Map<string, PullRequest>, inbox: PullRequest[], baseline: boolean): Promise<void> {
+  if (baseline) return
+  const fresh = inbox.filter((p) => {
+    if (p.mine || p.isDraft || sched.state.missions.some((m) => m.prId === p.id && m.state !== 'closed')) return false
+    const seen = previous.get(p.id)
+    return !seen || (seen.isDraft && !p.isDraft)
+  })
+  if (fresh.length === 0) return
+  if (fresh.length > NEW_PR_BURST) {
+    sched.notify(newPullRequestsSummary(fresh))
+    return
+  }
+  for (const pr of fresh) {
+    let full = pr
+    if (pr.additions === undefined) {
+      // The search listing carries no sizes; one detail fetch per new PR gives the notification its counts.
+      try {
+        full = freshest(pr, withoutComments(await sched.ports.github.getPullRequest(pr.repo.fullName, pr.number)))
+        inbox[inbox.indexOf(pr)] = full
+      } catch {
+        // The listing copy stands in.
+      }
+    }
+    sched.notify(newPullRequestNotification(full))
+  }
+}
+
 export async function pollInbox(sched: Scheduler): Promise<void> {
   const { state } = sched
   const { github } = sched.ports
+  const previous = new Map(state.inbox.map((p) => [p.id, p]))
+  const baseline = state.lastPollAt === undefined
   let listed: Map<string, PullRequest>
   let fetched: Map<string, PullRequestDetail>
   try {
@@ -148,6 +179,12 @@ export async function pollInbox(sched: Scheduler): Promise<void> {
       if (mission.state === 'closed' || inbox.some((p) => p.id === mission.prId)) continue
       inbox.push(structuredClone(mission.pr))
     }
+    // An ignored PR comes back when its author pushes, and is forgotten once it leaves the Inbox.
+    for (const [id, sha] of Object.entries(state.ignoredPrs)) {
+      const pr = inbox.find((p) => p.id === id)
+      if (!pr || pr.headSha !== sha) delete state.ignoredPrs[id]
+    }
+    await announceNewPullRequests(sched, previous, inbox, baseline)
     state.inbox = inbox
   } catch (e) {
     state.pollError = errorMessage(e)
@@ -202,14 +239,24 @@ export async function applyPullRequest(sched: Scheduler, mission: Mission, fresh
       if (moved && !mission.timeline.some((e) => e.note?.startsWith(note))) {
         const held = followUpHeldBecause(mission, settings)
         sched.annotate(mission, `${note}; ${autoFollowUpAllowed(mission, settings) ? 'waiting for a reply' : 'auto follow-up paused'}`)
-        sched.notify({ title: `New push on #${fresh.number}`, body: `${held} Re-run when ready.`, missionId: mission.id })
+        sched.notify({ title: `New push on #${fresh.number}`, body: `${held} Re-run when ready.`, missionId: mission.id, actions: [rerun('Review the delta'), OPEN] })
       }
       if (newReplies.length > 0) {
         sched.annotate(mission, `${fresh.author} replied`)
         if (!moved) {
-          sched.notify({ title: `${fresh.author} replied on #${fresh.number}`, body: 'No new commits yet, so no follow-up has started.', missionId: mission.id })
+          sched.notify({
+            title: `${fresh.author} replied on #${fresh.number}`,
+            body: 'No new commits yet, so no follow-up has started.',
+            missionId: mission.id,
+            actions: [rerun('Review again'), OPEN]
+          })
         } else if (!pushed) {
-          sched.notify({ title: `${fresh.author} replied on #${fresh.number}`, body: `${followUpHeldBecause(mission, settings)} Re-run when ready.`, missionId: mission.id })
+          sched.notify({
+            title: `${fresh.author} replied on #${fresh.number}`,
+            body: `${followUpHeldBecause(mission, settings)} Re-run when ready.`,
+            missionId: mission.id,
+            actions: [rerun('Review the delta'), OPEN]
+          })
         }
       }
       sched.changed()
@@ -223,7 +270,8 @@ export async function applyPullRequest(sched: Scheduler, mission: Mission, fresh
       sched.notify({
         title: `New push on #${fresh.number} while findings wait`,
         body: `${shortSha(fresh.headSha)} by ${fresh.author}`,
-        missionId: mission.id
+        missionId: mission.id,
+        actions: [rerun('Re-run'), OPEN]
       })
       return
     case 'preparing':

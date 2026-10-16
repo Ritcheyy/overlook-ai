@@ -22,3 +22,5 @@ mac:
   darkModeSupport: true
   extendInfo:
     NSHumanReadableCopyright: ''
+    # Alerts keep their buttons visible; banners hide them behind a hover.
+    NSUserNotificationAlertStyle: alert

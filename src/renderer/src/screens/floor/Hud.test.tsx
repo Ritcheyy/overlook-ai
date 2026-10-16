@@ -41,7 +41,7 @@ function mission(prIndex: number, state: MissionState, extra: Partial<Mission> =
 }
 
 function snapshotWith(missions: Mission[]): AppSnapshot {
-  return { inbox: prs, missions, slots: settings.slots, settings, localRepos: [], version: 'test' }
+  return { inbox: prs, ignoredPrs: {}, missions, slots: settings.slots, settings, localRepos: [], version: 'test' }
 }
 
 const loadoutName = settings.loadouts.find((l) => l.id === settings.defaultLoadoutId)!.name

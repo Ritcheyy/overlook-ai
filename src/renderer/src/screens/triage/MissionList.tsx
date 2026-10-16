@@ -1,9 +1,10 @@
 import type { Mission, MissionState } from '@core/domain'
 import { cn } from '@/lib/cn'
 import { relativeTime } from '@/lib/format'
-import { hasUpdates, repoShortName } from '@/lib/review'
+import { hasUpdates } from '@/lib/review'
 import type { TriageFilter } from '@/state/store'
 import { PrMarkers } from '@/components/app/PrMarkers'
+import { RepoBadge } from '@/components/app/RepoBadge'
 import { StateChip } from '@/components/app/StateChip'
 
 const IN_PROGRESS: readonly MissionState[] = ['queued', 'preparing', 'reviewing', 'posting']
@@ -55,15 +56,14 @@ function Row({ mission, selected, now, onSelect, showState }: { mission: Mission
           selected ? 'bg-raised shadow-[inset_2px_0_0_rgb(var(--accent))]' : 'hover:bg-surface'
         )}
       >
-        <div className="flex w-full items-start gap-1.5">
-          <span className="mt-px shrink-0 font-mono text-[11px] text-faint">#{pr.number}</span>
-          <span className="line-clamp-2 min-w-0 flex-1 text-[12.5px] leading-snug text-ink">{pr.title}</span>
+        <div className="flex w-full items-center gap-1.5">
+          <RepoBadge repo={pr.repo} number={pr.number} />
+          <span className="min-w-0 flex-1" />
           {showState && <StateChip state={mission.state} />}
         </div>
+        <span className="line-clamp-2 w-full text-[12.5px] leading-snug text-ink">{pr.title}</span>
         <div className="flex w-full items-center gap-1.5 text-[11px] text-faint">
-          <span className="min-w-0 truncate">
-            <span className="text-muted">{repoShortName(pr.repo.fullName)}</span> · {pr.author}
-          </span>
+          <span className="min-w-0 truncate">{pr.author}</span>
           <span className="ml-auto shrink-0" title={mission.updatedAt}>
             {relativeTime(mission.updatedAt, now)}
           </span>

@@ -128,11 +128,16 @@ function arrayOrEmpty<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : []
 }
 
+function recordOfStrings(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([, v]) => typeof v === 'string')) as Record<string, string>
+}
+
 export function createEngine(opts: EngineOptions): Engine {
   const { ports } = opts
   const listeners: Listeners = { snapshot: new Set(), activity: new Set(), notification: new Set(), navigate: new Set() }
   const baseSettings = defaultSettings(opts.defaultSettings)
-  const state: EngineState = { settings: baseSettings, inbox: [], missions: [], slots: [], localRepos: [] }
+  const state: EngineState = { settings: baseSettings, inbox: [], ignoredPrs: {}, missions: [], slots: [], localRepos: [] }
 
   let snapshotTimer: ReturnType<typeof setTimeout> | undefined
   let persistTimer: ReturnType<typeof setTimeout> | undefined
@@ -155,6 +160,7 @@ export function createEngine(opts: EngineOptions): Engine {
   function snapshot(): AppSnapshot {
     return structuredClone({
       inbox: state.inbox,
+      ignoredPrs: state.ignoredPrs,
       missions: state.missions,
       slots: state.slots,
       settings: state.settings,
@@ -188,6 +194,7 @@ export function createEngine(opts: EngineOptions): Engine {
       missions: state.missions,
       settings: state.settings,
       inbox: state.inbox,
+      ignoredPrs: state.ignoredPrs,
       lastPollAt: state.lastPollAt
     })
   }
@@ -364,6 +371,16 @@ export function createEngine(opts: EngineOptions): Engine {
     retryMission: async (id) => sched.retryMission(id),
     rerunMission: async (id, loadoutId, options) => sched.rerunMission(id, loadoutId, options),
     closeMission: (id) => sched.closeMission(id, 'closed by user'),
+    ignorePullRequest: async (prId) => {
+      const pr = state.inbox.find((p) => p.id === prId)
+      if (!pr) throw new Error(`Pull request not in the Inbox: ${prId}`)
+      state.ignoredPrs[prId] = pr.headSha
+      sched.changed()
+    },
+    unignorePullRequest: async (prId) => {
+      delete state.ignoredPrs[prId]
+      sched.changed()
+    },
     setFindingDecision: async (args) => sched.setFindingDecision(args),
     setFindingDecisions: async (args) => sched.setFindingDecisions(args),
     setRoundSummary: async (args) => sched.setRoundSummary(args),
@@ -396,6 +413,7 @@ export function createEngine(opts: EngineOptions): Engine {
     state.settings = sanitizeSettings(persisted?.settings, defaultSettings(opts.defaultSettings))
     state.missions = arrayOrEmpty(persisted?.missions)
     state.inbox = arrayOrEmpty(persisted?.inbox)
+    state.ignoredPrs = recordOfStrings(persisted?.ignoredPrs)
     state.lastPollAt = typeof persisted?.lastPollAt === 'string' ? persisted.lastPollAt : undefined
     sched.recover()
     emitSnapshotNow()

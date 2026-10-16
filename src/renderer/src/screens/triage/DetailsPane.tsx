@@ -19,7 +19,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { Markdown } from '@/components/ui/Markdown'
 import { DetailsSide } from './DetailsSide'
 import { PrHeader } from './PrHeader'
-import { RoundView, SectionLabel } from './RoundView'
+import { RoundMeta, RoundView, SectionLabel } from './RoundView'
 import { StatusLine } from './StatusLine'
 import { useMissionActions } from './useMissionActions'
 
@@ -271,10 +271,16 @@ export function DetailsPane({ pr, mission }: DetailsPaneProps) {
       <StatusLine pr={pr} mission={mission} settings={settings} slots={slots} now={now} />
       <div className="min-h-0 flex-1 overflow-auto">
         <div className="mx-auto grid max-w-[1180px] gap-4 px-5 py-4 min-[1360px]:grid-cols-[minmax(0,1fr)_300px]">
+          {round && (
+            // One row across both columns, so the round's cards and the side cards start level.
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 min-[1360px]:col-span-2">
+              {rounds.length > 1 && <RoundTabs rounds={rounds} selectedId={round.id} runningId={runningId} onSelect={setRoundId} />}
+              <RoundMeta round={round} now={now} />
+            </div>
+          )}
           <div className="flex min-w-0 flex-col gap-4">
             {mission?.state === 'closed' && mission.error && <ErrorBox error={mission.error} />}
             {failedBeforeRound && round && <ErrorPanel mission={mission} />}
-            {rounds.length > 1 && <RoundTabs rounds={rounds} selectedId={round?.id} runningId={runningId} onSelect={setRoundId} />}
             {content}
           </div>
           <DetailsSide pr={pr} mission={mission} round={round} settings={settings} slots={slots} now={now} />

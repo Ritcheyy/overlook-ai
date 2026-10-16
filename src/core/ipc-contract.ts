@@ -61,6 +61,8 @@ export type ScreenName = 'floor' | 'inbox' | 'triage' | 'log' | 'settings'
 export interface NavigateArgs {
   screen: ScreenName
   missionId?: string
+  /** Opens a PR's details when there is no review of it yet. */
+  prId?: string
 }
 
 export type DemoEventKind = 'push' | 'reply' | 'close' | 'merge' | 'new_pr' | 'fail_next_review'
@@ -84,6 +86,9 @@ export interface Api {
   rerunMission(missionId: string, loadoutId?: string, options?: RunOptions): Promise<void>
   /** Remove the worktree and end the mission. */
   closeMission(missionId: string): Promise<void>
+  /** Hides the PR from the Inbox until its author pushes again. */
+  ignorePullRequest(prId: string): Promise<void>
+  unignorePullRequest(prId: string): Promise<void>
   setFindingDecision(args: FindingDecisionArgs): Promise<void>
   setFindingDecisions(args: BulkFindingDecisionArgs): Promise<void>
   /** Edit the summary that heads the posted comment; allowed while the round is un-posted. */
@@ -126,6 +131,8 @@ export const API_METHODS: readonly ApiMethod[] = [
   'retryMission',
   'rerunMission',
   'closeMission',
+  'ignorePullRequest',
+  'unignorePullRequest',
   'setFindingDecision',
   'setFindingDecisions',
   'setRoundSummary',
