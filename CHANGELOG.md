@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Notifications carry their next step as buttons: the macOS notification shows the main one on hover and the in-app toast shows them all. Review now or Ignore for a new review request, Open triage for findings, Review the delta or Review again after a push or a reply, Retry after a failure. New review requests from other people are announced with the repo, number, author and size; more than five at once become one summary. Ignore hides a PR until its author pushes again, with an Ignored filter in the Inbox to bring one back.
+- Notifications carry their next step as buttons: the macOS notification shows the main one on hover, and the app keeps every notification at the bottom right, with all its buttons, until it is dismissed or acted on. Review now or Ignore for a new review request, Open triage for findings, Review the delta or Review again after a push or a reply, Retry after a failure. New review requests from other people are announced with the repo, number, author and size; more than five at once become one summary. Ignore hides a PR until its author pushes again, with an Ignored filter in the Inbox to bring one back.
 - The repo and PR number show as a badge in the repo's own colour on the details header and on the Inbox, Triage and Log rows.
 - The round line and tabs sit above both columns of the details screen, so the round's cards and the Review card start level.
 - Reviews can run through the Cursor CLI instead of Claude Code. Settings > Engine picks the CLI and its model; a Cursor run stays read-only through a permissions file written into the worktree, with the PR branch's own `.cursor` folder set aside for the review. Cursor reports no cost, so those rounds show none and the budget does not apply.

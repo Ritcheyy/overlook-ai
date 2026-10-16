@@ -3,6 +3,7 @@
  * the `Api` contract plus push events. Composed by the Electron main process
  * (real adapters) and by the browser demo (mocks) alike.
  */
+import { nanoid } from 'nanoid'
 import type { AppSnapshot, DetectedWorkspace, EnvironmentCheck, FileLinkTarget, Settings } from '../domain'
 import { ENVIRONMENT_CHECK_LABELS, REVIEWER_ENGINES } from '../domain'
 import type { Api, DemoSimulateArgs, Engine, PushEvent, PushEvents } from '../ipc-contract'
@@ -37,6 +38,8 @@ export interface EngineOptions {
 
 const SNAPSHOT_COALESCE_MS = 10
 const PERSIST_DEBOUNCE_MS = 250
+/** Notifications waiting in the app; the oldest give way beyond this. */
+const MAX_PENDING_NOTIFICATIONS = 20
 const MAX_TIMER_DELAY_MS = 2 ** 31 - 1
 export const MIN_POLL_INTERVAL_SEC = 15
 const FILE_LINK_TARGETS: readonly FileLinkTarget[] = ['vscode', 'cursor', 'github']
@@ -137,7 +140,7 @@ export function createEngine(opts: EngineOptions): Engine {
   const { ports } = opts
   const listeners: Listeners = { snapshot: new Set(), activity: new Set(), notification: new Set(), navigate: new Set() }
   const baseSettings = defaultSettings(opts.defaultSettings)
-  const state: EngineState = { settings: baseSettings, inbox: [], ignoredPrs: {}, missions: [], slots: [], localRepos: [] }
+  const state: EngineState = { settings: baseSettings, inbox: [], ignoredPrs: {}, notifications: [], missions: [], slots: [], localRepos: [] }
 
   let snapshotTimer: ReturnType<typeof setTimeout> | undefined
   let persistTimer: ReturnType<typeof setTimeout> | undefined
@@ -161,6 +164,7 @@ export function createEngine(opts: EngineOptions): Engine {
     return structuredClone({
       inbox: state.inbox,
       ignoredPrs: state.ignoredPrs,
+      notifications: state.notifications,
       missions: state.missions,
       slots: state.slots,
       settings: state.settings,
@@ -233,6 +237,9 @@ export function createEngine(opts: EngineOptions): Engine {
 
   function notifyUser(n: PushEvents['notification']): void {
     emit('notification', n)
+    // Kept in the app until dismissed; the OS copy below is what reaches the user elsewhere.
+    state.notifications = [...state.notifications.slice(-(MAX_PENDING_NOTIFICATIONS - 1)), { ...n, id: nanoid(), at: ports.clock.now().toISOString() }]
+    scheduleSnapshot()
     if (!state.settings.notifications) return
     try {
       ports.notifier.notify(n)
@@ -380,6 +387,10 @@ export function createEngine(opts: EngineOptions): Engine {
     unignorePullRequest: async (prId) => {
       delete state.ignoredPrs[prId]
       sched.changed()
+    },
+    dismissNotification: async (id) => {
+      state.notifications = state.notifications.filter((n) => n.id !== id)
+      scheduleSnapshot()
     },
     setFindingDecision: async (args) => sched.setFindingDecision(args),
     setFindingDecisions: async (args) => sched.setFindingDecisions(args),

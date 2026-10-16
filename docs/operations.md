@@ -65,7 +65,7 @@ Review the delta by hand from the status line at any time; a manual round is als
 
 ## Notifications
 
-Every notification carries its next step. The macOS notification shows one button when you hover over it: Review now on a new review request, Open triage when findings are ready, Review the delta or Review again after a push or a reply, Retry after a failure. macOS only reveals notification buttons on hover, and folds two or more into an Options menu, which is why the notification carries one. The in-app toast at the bottom right shows every action, Ignore included.
+Every notification carries its next step. The macOS notification shows one button when you hover over it: Review now on a new review request, Open triage when findings are ready, Review the delta or Review again after a push or a reply, Retry after a failure. macOS only reveals notification buttons on hover, and folds two or more into an Options menu, which is why the notification carries one. Inside the app, every notification waits at the bottom right with all its actions, Ignore included, until you dismiss it, open it or press a button; the newest four show and the rest queue behind them. They are not kept across a restart.
 
 The packaged app asks macOS for the persistent alert style so a notification waits until you deal with it; System Settings > Notifications > Overlook can change that.
 

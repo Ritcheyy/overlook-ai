@@ -44,6 +44,7 @@ function buildSnapshot(): AppSnapshot {
   return {
     inbox,
     ignoredPrs: {},
+    notifications: [],
     missions: [mission],
     slots: settings.slots,
     settings,

@@ -45,15 +45,36 @@ function navigateTo(target: NavigateArgs): void {
   })
 }
 
+/** Notifications a garbage collector may reclaim stop reporting clicks, so each one is held until it closes. */
+const MAX_LIVE_NOTIFICATIONS = 30
+
 /** The engine comes after the ports, so the notifier reaches its API through a getter. */
 function electronNotifier(getApi: () => Api | undefined): NotifierPort {
+  const live = new Set<Notification>()
+  const release = (note: Notification) => {
+    live.delete(note)
+  }
   return {
     notify(n) {
       if (!Notification.isSupported()) return
       const actions = osNotificationActions(n)
       const note = new Notification({ title: n.title, body: n.body, actions: actions.map((a) => ({ type: 'button', text: a.label })) })
-      note.on('click', () => navigateTo(notificationTarget(n)))
+      live.add(note)
+      if (live.size > MAX_LIVE_NOTIFICATIONS) {
+        const oldest = live.values().next().value
+        if (oldest) {
+          release(oldest)
+          oldest.close()
+        }
+      }
+      note.on('close', () => release(note))
+      note.on('failed', () => release(note))
+      note.on('click', () => {
+        release(note)
+        navigateTo(notificationTarget(n))
+      })
       note.on('action', (_event, index) => {
+        release(note)
         const action = actions[index]
         const api = getApi()
         if (!action || !api) return
