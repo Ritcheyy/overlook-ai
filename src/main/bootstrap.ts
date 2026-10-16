@@ -10,7 +10,7 @@ import { createEngine } from '@core/engine/api-server'
 import type { Settings } from '@core/domain'
 import { persistedDemoSeed } from '@core/demo/engine'
 import type { Api, Engine, NavigateArgs } from '@core/ipc-contract'
-import { notificationTarget, performNotificationAction } from '@core/notifications'
+import { notificationTarget, osNotificationActions, performNotificationAction } from '@core/notifications'
 import type { NotifierPort, Ports } from '@core/ports'
 import { systemClock } from '@core/ports'
 import { defaultSettings } from '@core/loadouts'
@@ -50,7 +50,7 @@ function electronNotifier(getApi: () => Api | undefined): NotifierPort {
   return {
     notify(n) {
       if (!Notification.isSupported()) return
-      const actions = n.actions ?? []
+      const actions = osNotificationActions(n)
       const note = new Notification({ title: n.title, body: n.body, actions: actions.map((a) => ({ type: 'button', text: a.label })) })
       note.on('click', () => navigateTo(notificationTarget(n)))
       note.on('action', (_event, index) => {
