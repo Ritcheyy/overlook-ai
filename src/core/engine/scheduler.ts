@@ -12,7 +12,6 @@ import type {
   Mission,
   MissionState,
   Notification,
-  PendingNotification,
   PullRequest,
   ReviewRound,
   RoundTrigger,
@@ -40,8 +39,6 @@ export interface EngineState {
   inbox: PullRequest[]
   /** PRs hidden from the Inbox, by id, with the head they were hidden at. */
   ignoredPrs: Record<string, string>
-  /** Kept until dismissed or acted on; not persisted. */
-  notifications: PendingNotification[]
   missions: Mission[]
   slots: Slot[]
   localRepos: LocalRepo[]

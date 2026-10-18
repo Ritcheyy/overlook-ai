@@ -30,7 +30,6 @@ function mission(id: string, prIndex: number, state: Mission['state'], createdAt
 const snapshot: AppSnapshot = {
   inbox: prs,
   ignoredPrs: {},
-  notifications: [],
   missions: [
     mission('first', 0, 'queued', '2026-09-13T12:00:00Z', [{ at: '2026-09-13T12:00:00Z', to: 'queued' }]),
     // Created earlier than 'first' but re-queued later (a retry), so it goes after it.

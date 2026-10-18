@@ -1,7 +1,9 @@
-import { Github, MessageSquareReply } from 'lucide-react'
-import type { Mission, PullRequest, ReviewDecision, Verdict } from '@core/domain'
+import { Gauge, Github, MessageSquareReply } from 'lucide-react'
+import type { Mission, PullRequest, ReviewDecision, Settings, Verdict } from '@core/domain'
+import { autoRoundsUsed } from '@core/domain'
 import { cn } from '@/lib/cn'
 import { hasReply, verdictRound, VERDICT_META } from '@/lib/review'
+import { selectSettings, useAppStore } from '@/state/store'
 import { Chip, DOT_TONE } from '../ui/Chip'
 
 /** The reviewer's verdict as a plain label, so it never reads as a button. */
@@ -49,6 +51,20 @@ export function RepliedChip({ className, label = 'replied' }: { className?: stri
   )
 }
 
+/** True once a review has used every automatic follow-up it gets, so the next round is yours to start. */
+export function followUpLimitReached(mission: Pick<Mission, 'rounds' | 'timeline'>, settings: Pick<Settings, 'maxAutoRoundsPerMission'>): boolean {
+  return settings.maxAutoRoundsPerMission > 0 && autoRoundsUsed(mission) >= settings.maxAutoRoundsPerMission
+}
+
+/** The tag for a watched review whose automatic follow-ups are used up. */
+export function FollowUpLimitChip({ className, max }: { className?: string; max: number }) {
+  return (
+    <Chip tone="amber" icon={<Gauge className="h-3 w-3" aria-hidden />} className={className} title={`All ${max} automatic follow-ups are used; re-run the next round yourself`}>
+      auto limit reached
+    </Chip>
+  )
+}
+
 export interface PrMarkersProps {
   pr: Pick<PullRequest, 'reviewDecision'>
   mission?: Mission
@@ -59,13 +75,16 @@ export interface PrMarkersProps {
 
 /** Verdict, new push, reply and GitHub's decision: what a PR row needs to say at a glance. */
 export function PrMarkers({ pr, mission, hideVerdict, className }: PrMarkersProps) {
+  const settings = useAppStore(selectSettings)
   const round = mission && !hideVerdict ? verdictRound(mission) : undefined
   const live = mission && mission.state !== 'closed'
+  const limit = live && mission.state === 'watching' && settings && followUpLimitReached(mission, settings)
   return (
     <span className={cn('inline-flex min-w-0 flex-wrap items-center gap-1.5', className)}>
       {round && <VerdictLabel verdict={round.verdict} title={`Reviewer's verdict on round ${round.index}`} />}
       {live && mission.stale && <NewPushChip />}
       {live && hasReply(mission) && <RepliedChip />}
+      {limit && <FollowUpLimitChip max={settings.maxAutoRoundsPerMission} />}
       <GitHubDecision decision={pr.reviewDecision} />
     </span>
   )

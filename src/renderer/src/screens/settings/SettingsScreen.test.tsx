@@ -24,7 +24,7 @@ import { SettingsScreen } from './SettingsScreen'
 const NOW = new Date('2026-09-13T12:00:00Z')
 
 function snapshotWith(settings: Settings): AppSnapshot {
-  return { inbox: seedPullRequests(NOW), ignoredPrs: {}, notifications: [], missions: [], slots: settings.slots, settings, localRepos: [], githubLogin: 'ritchey', version: 'test' }
+  return { inbox: seedPullRequests(NOW), ignoredPrs: {}, missions: [], slots: settings.slots, settings, localRepos: [], githubLogin: 'ritchey', version: 'test' }
 }
 
 function renderSettings(overrides: Partial<Settings> = {}) {

@@ -24,7 +24,6 @@ function buildSnapshot(settings: Settings): AppSnapshot {
   return {
     inbox: seedPullRequests(NOW),
     ignoredPrs: {},
-    notifications: [],
     missions: [],
     slots: settings.slots,
     settings,
