@@ -362,18 +362,10 @@ export type ReviewerEngine = 'claude' | 'cursor'
 export const REVIEWER_ENGINES: readonly ReviewerEngine[] = ['claude', 'cursor']
 export const REVIEWER_ENGINE_LABELS: Record<ReviewerEngine, string> = { claude: 'Claude Code', cursor: 'Cursor' }
 
-/** A notification the app keeps until it is dismissed or acted on, so it survives a glance away and a reopened window. */
-export interface PendingNotification extends Notification {
-  id: string
-  at: string
-}
-
 export interface AppSnapshot {
   inbox: PullRequest[]
   /** PRs hidden from the Inbox by id, with the head they were hidden at; a push brings them back. */
   ignoredPrs: Record<string, string>
-  /** Newest last; shown in the app until dismissed. */
-  notifications: PendingNotification[]
   missions: Mission[]
   slots: Slot[]
   settings: Settings

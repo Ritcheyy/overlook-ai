@@ -60,12 +60,13 @@ Every comment that posts findings numbers them and ends with the reply request (
 - **Reply and push:** a follow-up round starts on its own if Automatic follow-up rounds allows one more, and is handed the reply as the author's claims to check.
 - **Push, no reply:** the PR is marked with a new push and waits.
 - **Reply, no push:** the PR is marked replied and a notification says no follow-up started, since a reply without code usually needs your reading.
+- **Limit reached:** once a watched PR has used every automatic round it gets, its rows carry an "auto limit reached" tag; later pushes and replies only mark it, and the next round is yours to start.
 
 Review the delta by hand from the status line at any time; a manual round is also given any replies.
 
 ## Notifications
 
-Every notification carries its next step. The macOS notification shows one button when you hover over it: Review now on a new review request, Open triage when findings are ready, Review the delta or Review again after a push or a reply, Retry after a failure. macOS only reveals notification buttons on hover, and folds two or more into an Options menu, which is why the notification carries one. Inside the app, every notification waits at the bottom right with all its actions, Ignore included, until you dismiss it, open it or press a button; the newest four show and the rest queue behind them. They are not kept across a restart.
+Every notification carries its next step. The macOS notification shows one button when you hover over it: Review now on a new review request, Open triage when findings are ready, Review the delta or Review again after a push or a reply, Retry after a failure. macOS only reveals notification buttons on hover, and folds two or more into an Options menu, which is why the notification carries one. Inside the app, the same notification shows as a toast at the bottom right for twelve seconds with all its actions, Ignore included.
 
 The packaged app asks macOS for the persistent alert style so a notification waits until you deal with it; System Settings > Notifications > Overlook can change that.
 

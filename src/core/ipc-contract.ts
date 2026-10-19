@@ -89,8 +89,6 @@ export interface Api {
   /** Hides the PR from the Inbox until its author pushes again. */
   ignorePullRequest(prId: string): Promise<void>
   unignorePullRequest(prId: string): Promise<void>
-  /** Drops a pending notification once it was read or acted on. */
-  dismissNotification(id: string): Promise<void>
   setFindingDecision(args: FindingDecisionArgs): Promise<void>
   setFindingDecisions(args: BulkFindingDecisionArgs): Promise<void>
   /** Edit the summary that heads the posted comment; allowed while the round is un-posted. */
@@ -135,7 +133,6 @@ export const API_METHODS: readonly ApiMethod[] = [
   'closeMission',
   'ignorePullRequest',
   'unignorePullRequest',
-  'dismissNotification',
   'setFindingDecision',
   'setFindingDecisions',
   'setRoundSummary',
