@@ -76,7 +76,7 @@ A delta round only reads the commits pushed since the last posted round, so on i
 - The round after a clean follow-up reads the whole PR from the start, and so does a round started when nothing was pushed (there is no delta to read). The status line says so before you start one, and the Scope choice in the Review options forces either reading.
 - A full pass runs at most once per push, and a full pass never starts another, so a PR cannot loop.
 
-A full pass costs what a first review costs, and a delta-plus-full round can spend up to twice the per-review budget, since the budget applies to each pass. Settings > General > "Full pass before approving" switches the in-round pass off. If the full pass fails (budget, timeout), the delta findings stand, the verdict is capped at Comments, and the round offers "Retry the full pass", which starts a whole-PR round at the same head.
+A full pass costs what a first review costs, and a delta-plus-full round can spend up to twice the per-review budget, since the budget applies to each pass. Settings > General > "Full pass before approving" switches off both the in-round pass and the whole-PR round after a clean follow-up; a re-run with nothing pushed and the Scope choice still read the whole PR. If the full pass fails (budget, timeout), the delta findings stand, the verdict is capped at Comments, and the round offers "Retry the full pass", which starts a whole-PR round at the same head.
 
 ## Notifications
 

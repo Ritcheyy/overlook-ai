@@ -144,16 +144,16 @@ export type Verdict = 'approve' | 'request_changes' | 'comment'
 export type RoundTrigger = 'dispatch' | 'rerun' | 'retry' | 'reply'
 
 /**
- * Choices made for one run in place of the settings defaults. Empty strings
- * mean "let the CLI decide", unlike an absent key, which keeps the setting.
- */
-/**
  * What a follow-up round reads: the commits since the last posted round, or
  * the whole change again. `delta+whole` is a delta that came back clean and
  * was followed by a full pass in the same round.
  */
 export type ReviewScope = 'delta' | 'whole' | 'delta+whole'
 
+/**
+ * Choices made for one run in place of the settings defaults. Empty strings
+ * mean "let the CLI decide", unlike an absent key, which keeps the setting.
+ */
 export interface RunOptions {
   model?: string
   effort?: '' | NonNullable<Settings['claudeEffort']>

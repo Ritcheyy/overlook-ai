@@ -121,8 +121,17 @@ function fullPassSection(req: ReviewRequest, previousRound: ReviewRound): string
   if (round.findings.length > 0) {
     lines.push('Found by the delta pass on this head, not yet posted:', ...round.findings.map((f) => `- ${f.severity} · ${f.title}${where(f)}`), '')
   }
+  if (req.fullPassAfterDelta) {
+    lines.push(`The delta pass already checked the findings of round ${previousRound.index} against this head. Do not repeat any of the above, and do not raise what was rejected.`)
+  } else {
+    // The author may be fixing the last finding right now; a fresh read must still say whether it is fixed.
+    lines.push(
+      `First check the findings posted in round ${previousRound.index} against this head. In your summary, say which are resolved and which still stand. A posted finding that still stands may be raised again, with the evidence, and the verdict cannot be approve while one does.`,
+      'Do not repeat findings that are resolved or were rejected.'
+    )
+  }
   lines.push(
-    'Do not repeat any of the above, and do not raise what was rejected. Report only what the earlier passes missed: blocker, major or minor problems. No nits, no praise.',
+    'Beyond that, report only what the earlier passes missed: blocker, major or minor problems. No nits, no praise.',
     'Set "missed_earlier" on each finding: true when the problem was already there in code an earlier round reviewed, false when a later push brought it.',
     'In your summary, say whether the whole change is ready to merge and name anything that is not.'
   )

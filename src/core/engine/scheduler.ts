@@ -335,7 +335,7 @@ export class Scheduler {
 
       const previousRound = lastPostedRound(mission)
       const replies = previousRound ? repliesFor(mission, previousRound) : undefined
-      const scope = previousRound ? nextScope(mission, prepared.headSha, runOptions?.scope) : undefined
+      const scope = previousRound ? nextScope(mission, prepared.headSha, settings, runOptions?.scope) : undefined
       round = {
         id: nanoid(),
         index: mission.rounds.length + 1,
@@ -402,7 +402,9 @@ export class Scheduler {
       // The options were for this run; a retry after a failure keeps them.
       mission.runOptions = undefined
       const decision = autoPost ? 'approved' : 'pending'
-      round.findings = result.findings.map((f): Finding => ({ ...f, id: nanoid(), decision }))
+      // A whole-change read hunts for what was missed; its nits and praise would only pad the list.
+      const kept = scope === 'whole' ? result.findings.filter((f) => f.severity !== 'nit' && f.severity !== 'praise') : result.findings
+      round.findings = kept.map((f): Finding => ({ ...f, id: nanoid(), decision }))
       round.summary = result.summary
       round.verdict = result.verdict
       round.briefing = result.briefing
@@ -629,6 +631,7 @@ export class Scheduler {
         ...(ctx.workspace && { workspace: ctx.workspace }),
         settings: clone(ctx.settings),
         scope: 'whole',
+        fullPassAfterDelta: true,
         signal: ctx.signal,
         onActivity: (a) => this.emitActivity(mission.id, a.kind, a.text)
       })

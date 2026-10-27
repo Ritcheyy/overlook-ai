@@ -642,10 +642,15 @@ describe('engine', () => {
     expect(h.runner.calls[2].diff).toContain('diff --git')
     expect(h.runner.calls[2].round.findings.length).toBeGreaterThan(0)
     expect(round.scope).toBe('delta+whole')
-    expect(round.summary).toContain('Full pass: The whole change reads clean')
-    expect(round.verdict).toBe('approve')
-    expect(round.findings.length).toBeGreaterThan(0)
-    expect(round.findings.every((f) => f.severity === 'nit' || f.severity === 'praise')).toBe(true)
+    expect(round.summary).toContain('Full pass: One thing the earlier rounds missed')
+    // The delta approved; the full pass only commented, and the stricter verdict wins.
+    expect(round.verdict).toBe('comment')
+    const delta = round.findings.filter((f) => !f.missedEarlier)
+    expect(delta.length).toBeGreaterThan(0)
+    expect(delta.every((f) => f.severity === 'nit' || f.severity === 'praise')).toBe(true)
+    // The full pass's minor joins the list tagged as missed; its nit is dropped.
+    expect(round.findings.filter((f) => f.missedEarlier)).toEqual([expect.objectContaining({ severity: 'minor', title: 'Refund amount is not validated against the order total', decision: 'pending' })])
+    expect(h.runner.calls[2].fullPassAfterDelta).toBe(true)
     expect(round.fullPassError).toBeUndefined()
     expect(m.timeline.some((e) => e.note?.startsWith('full pass over the whole PR at'))).toBe(true)
   })
@@ -659,6 +664,10 @@ describe('engine', () => {
     expect(h.runner.calls.map((c) => c.scope)).toEqual([undefined, 'delta'])
     expect(m.rounds[1].scope).toBe('delta')
     expect(m.rounds[1].summary).not.toContain('Full pass:')
+    // Off means off: the round after a clean follow-up reads the delta as well.
+    await approveAndPost(h, a.id)
+    const third = await pushAndRerun(h, PR_412, a.id)
+    expect(third.rounds[2].scope).toBe('delta')
   })
 
   it('reads the whole PR on the round after a clean follow-up, and when nothing was pushed', async () => {
@@ -671,8 +680,12 @@ describe('engine', () => {
     const third = await pushAndRerun(h, PR_412, a.id)
     expect(third.rounds[2].scope).toBe('whole')
     expect(h.runner.calls.at(-1)).toMatchObject({ scope: 'whole' })
+    expect(h.runner.calls.at(-1)?.fullPassAfterDelta).toBeUndefined()
     expect(h.runner.calls.at(-1)?.diff).toContain('diff --git')
     expect(h.runner.calls).toHaveLength(4)
+    // A whole-change round keeps blocker, major and minor only, like the chained pass.
+    expect(third.rounds[2].findings.map((f) => f.title)).toEqual(['Refund amount is not validated against the order total'])
+    expect(third.rounds[2].findings[0].missedEarlier).toBe(true)
     await approveAndPost(h, a.id)
     await h.api.rerunMission(a.id)
     const fourth = await waitForState(h, a.id, 'needs_you')
@@ -701,7 +714,7 @@ describe('engine', () => {
     await h.api.rerunMission(a.id, undefined, { scope: 'whole' })
     const after = await waitForState(h, a.id, 'needs_you')
     expect(after.rounds).toHaveLength(3)
-    expect(after.rounds[2]).toMatchObject({ scope: 'whole', verdict: 'approve', headSha: round.headSha })
+    expect(after.rounds[2]).toMatchObject({ scope: 'whole', verdict: 'comment', headSha: round.headSha })
     expect(h.runner.calls.at(-1)).toMatchObject({ scope: 'whole' })
   })
 

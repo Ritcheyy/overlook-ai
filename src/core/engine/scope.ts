@@ -3,7 +3,7 @@
  * so once a follow-up comes back clean the whole change is read again before
  * anything approves, and the round after a clean one reads it all as well.
  */
-import type { Mission, ReviewRound, Verdict } from '../domain'
+import type { Mission, ReviewRound, Settings, Verdict } from '../domain'
 import { lastPostedRound } from '../domain'
 
 /** Clean means at most one finding above nit; nits and praise never count. */
@@ -18,15 +18,16 @@ export function wholePassDone(mission: Pick<Mission, 'rounds'>, headSha: string)
 
 /**
  * The delta by default; the whole PR when asked, when nothing was pushed
- * since the last posted round (there is no delta to read), or when that
- * round was a clean follow-up.
+ * since the last posted round (there is no delta to read), or, with full
+ * passes on, when that round was a clean follow-up. Clean is judged on what
+ * the author actually saw: the posted findings.
  */
-export function nextScope(mission: Mission, headSha: string, forced?: 'delta' | 'whole'): 'delta' | 'whole' {
+export function nextScope(mission: Mission, headSha: string, settings: Pick<Settings, 'fullPassBeforeApproval'>, forced?: 'delta' | 'whole'): 'delta' | 'whole' {
   if (forced) return forced
   const posted = lastPostedRound(mission)
   if (!posted) return 'delta'
   if (headSha === posted.headSha) return 'whole'
-  if (posted.previousHeadSha && isCleanRound(posted)) return 'whole'
+  if (settings.fullPassBeforeApproval && posted.previousHeadSha && isCleanRound({ findings: posted.findings.filter((f) => f.decision === 'approved') })) return 'whole'
   return 'delta'
 }
 

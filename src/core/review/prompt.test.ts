@@ -155,6 +155,13 @@ describe('buildReviewPrompt', () => {
     expect(prompt).toContain('Found by the delta pass on this head, not yet posted:')
     expect(prompt).toContain('- minor · Delta minor')
     expect(prompt).toContain('No nits, no praise.')
+    // A whole-PR round started on its own still has to say whether the last findings were fixed.
+    expect(prompt).toContain('First check the findings posted in round 1 against this head. In your summary, say which are resolved and which still stand.')
+    expect(prompt).toContain('the verdict cannot be approve while one does')
+    expect(prompt).not.toContain('The delta pass already checked')
+    const chained = buildReviewPrompt(makeRequest({ mission, round: round2, previousRound: round1, diff: '', scope: 'whole', fullPassAfterDelta: true }))
+    expect(chained).toContain('The delta pass already checked the findings of round 1 against this head. Do not repeat any of the above')
+    expect(chained).not.toContain('First check the findings posted')
     expect(prompt).toContain('"missed_earlier": true | false')
     expect(prompt).toContain('No inline diff was provided. Run `git diff origin/main...HEAD`')
     expect(prompt).not.toContain('## Follow-up round')
