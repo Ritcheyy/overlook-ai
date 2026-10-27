@@ -65,6 +65,7 @@ function findingMeta(mission: Mission, round: ReviewRound, f: Finding): string {
   }
   // GitHub links `owner/name#123` on its own.
   if (f.relatedPr) parts.push(`relates to ${f.relatedPr}`)
+  if (f.missedEarlier) parts.push('missed earlier')
   return parts.join(' · ')
 }
 
@@ -124,12 +125,15 @@ export function buildComment(args: BuildCommentArgs): string {
   const count = approved.length
 
   const lines: string[] = []
-  lines.push(`### Review of ${head}${round.index > 1 ? ` · round ${round.index}` : ''}`)
+  lines.push(`### Review of ${head}${round.index > 1 ? ` · round ${round.index}` : ''}${round.scope === 'whole' ? ' · full pass' : ''}`)
   lines.push(`${VERDICT_LABELS[round.verdict]} · ${count} finding${count === 1 ? '' : 's'}`)
   lines.push('')
   lines.push(round.summary.trim())
   if (round.previousHeadSha) {
-    lines.push('', `Follow-up on ${shortSha(round.previousHeadSha)} → ${head}.`)
+    const previous = shortSha(round.previousHeadSha)
+    if (round.scope === 'whole') lines.push('', `Full pass over the whole change at ${head}, after the review of ${previous}.`)
+    else if (round.scope === 'delta+whole') lines.push('', `Follow-up on ${previous} → ${head}, then a full pass over the whole change.`)
+    else lines.push('', `Follow-up on ${previous} → ${head}.`)
   }
 
   if (count === 0) {

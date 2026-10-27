@@ -8,6 +8,8 @@ import type {
   DropReason,
   EnvironmentCheck,
   Finding,
+  FindingDecision,
+  Loadout,
   LocalRepo,
   Mission,
   MissionState,
@@ -19,7 +21,7 @@ import type {
   Settings,
   Slot
 } from '../domain'
-import { lastPostedRound, latestRound, missionHoldsSlot, prIdOf } from '../domain'
+import { lastPostedRound, latestRound, missionHoldsSlot, prIdOf, shortSha } from '../domain'
 import type {
   BulkFindingDecisionArgs,
   DispatchArgs,
@@ -27,12 +29,13 @@ import type {
   SetAutoFollowUpArgs,
   SetRoundSummaryArgs
 } from '../ipc-contract'
-import type { Ports, WorkspaceContext } from '../ports'
+import type { GitHubPort, Ports, RunnerPort, WorkspaceContext } from '../ports'
 import { buildComment } from '../comment-builder'
 import { approachChecked } from '../review/prompt'
 import { expandHome, parsePrId, worktreePathFor } from './paths'
 import { OPEN, RETRY } from '../notifications'
 import { applyRunOptions, runBudgetUsd, runEffort, runModel, sanitizeRunOptions, trimReplies } from './run-options'
+import { isCleanRound, nextScope, wholePassDone, worseVerdict } from './scope'
 import { buildWorkspaceContext, describeWorkspaceContext, workspaceFor } from './workspaces'
 
 export interface EngineState {
@@ -332,6 +335,7 @@ export class Scheduler {
 
       const previousRound = lastPostedRound(mission)
       const replies = previousRound ? repliesFor(mission, previousRound) : undefined
+      const scope = previousRound ? nextScope(mission, prepared.headSha, settings, runOptions?.scope) : undefined
       round = {
         id: nanoid(),
         index: mission.rounds.length + 1,
@@ -343,7 +347,8 @@ export class Scheduler {
         verdict: 'comment',
         // An empty model is the CLI default; the runner replaces the alias with what the CLI resolved.
         model: runModel(settings) || 'default',
-        trigger
+        trigger,
+        ...(scope && { scope })
       }
       // Only Claude Code takes an effort level and a budget; a Cursor round records neither.
       const effort = runEffort(settings)
@@ -360,10 +365,10 @@ export class Scheduler {
       mission.authorReplies = undefined
       this.changed()
 
-      // A follow-up reviews the delta since the posted round, which only the
-      // runner can compute inside the worktree.
+      // A delta round reviews the commits since the posted round, which only
+      // the runner can compute inside the worktree; a full read gets the PR diff.
       let diff = ''
-      if (!previousRound) {
+      if (!previousRound || scope === 'whole') {
         try {
           diff = await github.getDiff(fullName, pr.number)
         } catch (e) {
@@ -383,6 +388,7 @@ export class Scheduler {
         previousRound: previousRound ? clone(previousRound) : undefined,
         ...(replies && { replies: clone(replies) }),
         ...(workspace && { workspace }),
+        ...(scope && { scope }),
         settings: clone(settings),
         signal,
         onActivity: (a) => this.emitActivity(mission.id, a.kind, a.text),
@@ -396,7 +402,9 @@ export class Scheduler {
       // The options were for this run; a retry after a failure keeps them.
       mission.runOptions = undefined
       const decision = autoPost ? 'approved' : 'pending'
-      round.findings = result.findings.map((f): Finding => ({ ...f, id: nanoid(), decision }))
+      // A whole-change read hunts for what was missed; its nits and praise would only pad the list.
+      const kept = scope === 'whole' ? result.findings.filter((f) => f.severity !== 'nit' && f.severity !== 'praise') : result.findings
+      round.findings = kept.map((f): Finding => ({ ...f, id: nanoid(), decision }))
       round.summary = result.summary
       round.verdict = result.verdict
       round.briefing = result.briefing
@@ -405,9 +413,14 @@ export class Scheduler {
       round.rawOutput = result.rawOutput
       round.costUsd = result.costUsd
       if (result.model) round.model = result.model
+      let durationMs = result.durationMs ?? Math.max(0, Date.parse(this.now()) - Date.parse(round.startedAt))
+      // A clean delta is not an approval of the whole change: read it all before anything posts.
+      if (scope === 'delta' && previousRound && settings.fullPassBeforeApproval && isCleanRound(round) && !wholePassDone(mission, round.headSha)) {
+        durationMs += await this.fullPass(mission, round, { runner, github, loadout, previousRound, worktreePath: prepared.worktreePath, workspace, settings, signal, decision })
+      }
       round.finishedAt = this.now()
-      round.durationMs = result.durationMs ?? Math.max(0, Date.parse(round.finishedAt) - Date.parse(round.startedAt))
-      this.emitActivity(mission.id, 'done', `${countFindings(round.findings.length)}, verdict ${result.verdict}`)
+      round.durationMs = durationMs
+      this.emitActivity(mission.id, 'done', `${countFindings(round.findings.length)}, verdict ${round.verdict}`)
       round.activity = this.activityTail(mission.id)
 
       if (autoPost) {
@@ -574,6 +587,80 @@ export class Scheduler {
     return round
   }
 
+  /**
+   * Re-reads the whole change inside the round whose delta came back clean,
+   * so an approval never rests on the pushed commits alone. Earlier findings
+   * are handed over as already raised; nits and praise are dropped. A
+   * failure keeps the delta findings, caps the verdict at comment and leaves
+   * the round open for a retry of the full pass. Returns the time it took.
+   */
+  private async fullPass(
+    mission: Mission,
+    round: ReviewRound,
+    ctx: {
+      runner: RunnerPort
+      github: GitHubPort
+      loadout: Loadout
+      previousRound: ReviewRound
+      worktreePath: string
+      workspace?: WorkspaceContext
+      settings: Settings
+      signal: AbortSignal
+      decision: FindingDecision
+    }
+  ): Promise<number> {
+    const { pr } = mission
+    const started = Date.now()
+    this.emitActivity(mission.id, 'thinking', 'The delta came back clean; reading the whole PR before anything posts')
+    this.annotate(mission, `full pass over the whole PR at ${shortSha(round.headSha)}`)
+    let diff = ''
+    try {
+      diff = await ctx.github.getDiff(pr.repo.fullName, pr.number)
+    } catch (e) {
+      this.emitActivity(mission.id, 'preparing', `Diff unavailable: ${errorMessage(e)}; the reviewer will run git diff itself`)
+    }
+    throwIfAborted(ctx.signal)
+    try {
+      const whole = await ctx.runner.review({
+        mission: clone(mission),
+        round: clone(round),
+        loadout: clone(ctx.loadout),
+        worktreePath: ctx.worktreePath,
+        diff,
+        previousRound: clone(ctx.previousRound),
+        ...(ctx.workspace && { workspace: ctx.workspace }),
+        settings: clone(ctx.settings),
+        scope: 'whole',
+        fullPassAfterDelta: true,
+        signal: ctx.signal,
+        onActivity: (a) => this.emitActivity(mission.id, a.kind, a.text)
+      })
+      throwIfAborted(ctx.signal)
+      // Anything the full pass finds after a delta on the same head is a catch the delta did not make.
+      const extra = whole.findings
+        .filter((f) => f.severity !== 'nit' && f.severity !== 'praise')
+        .map((f): Finding => ({ ...f, missedEarlier: f.missedEarlier ?? true, id: nanoid(), decision: ctx.decision }))
+      round.findings.push(...extra)
+      round.summary = `${round.summary.trim()}\n\nFull pass: ${whole.summary.trim()}`
+      round.verdict = worseVerdict(round.verdict, whole.verdict)
+      if (whole.rawOutput) round.rawOutput = [round.rawOutput, whole.rawOutput].filter(Boolean).join('\n\n----- full pass -----\n\n')
+      if (whole.costUsd !== undefined) round.costUsd = (round.costUsd ?? 0) + whole.costUsd
+      round.scope = 'delta+whole'
+      this.emitActivity(mission.id, 'done', `full pass: ${countFindings(extra.length)}`)
+      return whole.durationMs ?? Date.now() - started
+    } catch (e) {
+      if (ctx.signal.aborted) throw e
+      const message = errorMessage(e)
+      round.fullPassError = message
+      if (round.verdict === 'approve') round.verdict = 'comment'
+      const spent = numberOnError(e, 'costUsd')
+      if (spent !== undefined) round.costUsd = (round.costUsd ?? 0) + spent
+      this.emitActivity(mission.id, 'error', `Full pass failed: ${message}`)
+      this.annotate(mission, 'full pass failed; verdict capped at comment')
+      return numberOnError(e, 'durationMs') ?? Date.now() - started
+    }
+  }
+
   rerunMission(missionId: string, loadoutId?: string, options?: RunOptions): void {
     const mission = this.mustFind(missionId)
     if (!['needs_you', 'watching', 'failed'].includes(mission.state)) {
@@ -702,6 +789,7 @@ function describeRun(loadoutName: string, options: RunOptions | undefined): stri
   if (options.effort !== undefined) parts.push(options.effort ? `effort ${options.effort}` : 'CLI default effort')
   if (options.maxBudgetUsd !== undefined) parts.push(`$${options.maxBudgetUsd} budget`)
   if (options.autoPost !== undefined) parts.push(options.autoPost ? 'posts without triage' : 'stops for triage')
+  if (options.scope !== undefined) parts.push(options.scope === 'whole' ? 'the whole PR' : 'changes since the last round')
   return parts.join(', ')
 }
 

@@ -43,6 +43,14 @@ describe('FindingRow', () => {
     expect(api.openExternal).toHaveBeenCalledWith('https://github.com/acme/checkout-api/pull/419')
   })
 
+  it('tags a finding a full pass caught in code an earlier round had reviewed', () => {
+    row({ finding: { ...finding, missedEarlier: true } })
+    expect(screen.getByText('missed earlier').className).toContain('text-amber')
+    cleanup()
+    row()
+    expect(screen.queryByText('missed earlier')).toBeNull()
+  })
+
   it('shows how a posted round decided each finding instead of the decision control', () => {
     row()
     expect(screen.getByText('Posted')).toBeTruthy()

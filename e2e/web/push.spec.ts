@@ -45,6 +45,7 @@ test("a push re-runs the review, the author's reply plus a push queues a follow-
   await statusLine(page).getByRole('button', { name: 'Review the delta' }).click()
   await expect(page.locator('[data-round="2"]')).toBeVisible()
   await expect(statusLine(page)).not.toContainText('out of date')
+  // Round 1 was never posted, so this re-run is a fresh full review, not a delta.
   await expect(findings(page)).toHaveCount(4)
   await expect(page.getByRole('tab', { name: /Round 2/ })).toHaveAttribute('aria-selected', 'true')
 
@@ -71,9 +72,12 @@ test("a push re-runs the review, the author's reply plus a push queues a follow-
   await expect(page.locator('[data-round="3"]')).toBeVisible()
   await expect(page.getByText("started by the author's reply")).toBeVisible()
   await expect(missionItem(page, 412)).toContainText('dami-codes')
-  // Follow-up rounds only re-check what the first round left as nits and praise.
-  await expect(findings(page)).toHaveCount(1)
-  await expect(findings(page).first()).toContainText('Unused import')
+  // The delta only re-checked the nit round 2 left, which made it a clean round, so the whole PR
+  // was read again in the same round and found one more thing, tagged as missed earlier.
+  await expect(page.getByText('delta, then a full pass')).toBeVisible()
+  await expect(findings(page)).toHaveCount(2)
+  await expect(findings(page).filter({ hasText: 'Unused import' })).toHaveCount(1)
+  await expect(findings(page).filter({ hasText: 'missed earlier' })).toContainText('Refund amount is not validated')
 
   await demoAction(page, 'Merge #412')
   await goTo(page, 'Triage')

@@ -125,6 +125,12 @@ function GeneralSection({ settings, save, initialDemoMode }: { settings: Setting
           wrapperClassName="w-[110px]"
         />
       </Field>
+      <Field
+        label="Full pass before approving"
+        hint="When a follow-up finds at most one thing above a nit, the whole PR is read again in the same round before anything posts, and the next round reads it all too. Such a round can spend up to twice the budget per review. Off, only a re-run with nothing pushed, or the Scope choice, reads the whole PR."
+      >
+        <Toggle aria-label="Full pass before approving" checked={settings.fullPassBeforeApproval} onChange={(fullPassBeforeApproval) => void save({ fullPassBeforeApproval })} />
+      </Field>
       <Field label="Demo mode" hint="Fake GitHub and a scripted reviewer. Nothing leaves the machine and no tokens are spent.">
         <Toggle aria-label="Demo mode" checked={settings.demoMode} onChange={(demoMode) => void save({ demoMode })} />
         {settings.demoMode !== initialDemoMode && (

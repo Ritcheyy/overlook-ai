@@ -49,18 +49,26 @@ export interface ReviewSplitButtonProps {
   /** `fromForm` is true when the options form started it, false for the quick click. */
   onStart: (start: ReviewStart, fromForm: boolean) => Promise<void> | void
   variant?: 'primary' | 'secondary'
+  /** Offer the scope choice; only follow-up rounds have one. */
+  scopeChoice?: boolean
   disabled?: boolean
   title?: string
   icon?: ReactNode
   className?: string
 }
 
+const SCOPES: SelectOption[] = [
+  { value: DEFAULT, label: 'As usual' },
+  { value: 'delta', label: 'Changes since the last round' },
+  { value: 'whole', label: 'The whole PR' }
+]
+
 /**
  * A review button whose chevron opens the options for this one run: review
  * type, model, effort, budget and auto-post. Anything left on its default
  * keeps following Settings.
  */
-export function ReviewSplitButton({ label, loadoutId, autoPost, onStart, variant = 'secondary', disabled, title, icon, className }: ReviewSplitButtonProps) {
+export function ReviewSplitButton({ label, loadoutId, autoPost, onStart, variant = 'secondary', scopeChoice, disabled, title, icon, className }: ReviewSplitButtonProps) {
   const settings = useAppStore(selectSettings)
   const anchor = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
@@ -115,18 +123,19 @@ export function ReviewSplitButton({ label, loadoutId, autoPost, onStart, variant
         </button>
       </div>
       <Dropdown open={open} onClose={close} anchorRef={anchor} align="end" width={340}>
-        {settings && <RunOptionsForm settings={settings} loadoutId={loadoutId} autoPost={autoPost} onSubmit={(s) => void start(s, true)} />}
+        {settings && <RunOptionsForm settings={settings} loadoutId={loadoutId} autoPost={autoPost} scopeChoice={scopeChoice} onSubmit={(s) => void start(s, true)} />}
       </Dropdown>
     </>
   )
 }
 
-function RunOptionsForm({ settings, loadoutId: initialLoadout, autoPost: initialAutoPost, onSubmit }: { settings: Settings; loadoutId: string; autoPost: boolean; onSubmit: (s: ReviewStart) => void }) {
+function RunOptionsForm({ settings, loadoutId: initialLoadout, autoPost: initialAutoPost, scopeChoice, onSubmit }: { settings: Settings; loadoutId: string; autoPost: boolean; scopeChoice?: boolean; onSubmit: (s: ReviewStart) => void }) {
   const [loadoutId, setLoadoutId] = useState(initialLoadout)
   const [model, setModel] = useState(DEFAULT)
   const [customModel, setCustomModel] = useState('')
   const [effort, setEffort] = useState(DEFAULT)
   const [budget, setBudget] = useState('')
+  const [scope, setScope] = useState(DEFAULT)
   const [autoPost, setAutoPost] = useState(initialAutoPost)
 
   const loadouts: SelectOption[] = settings.loadouts.map((l) => ({ value: l.id, label: l.name }))
@@ -147,6 +156,7 @@ function RunOptionsForm({ settings, loadoutId: initialLoadout, autoPost: initial
     const n = Number(budget)
     if (budget.trim() !== '' && Number.isFinite(n) && n >= 0) options.maxBudgetUsd = n
     if (autoPost !== initialAutoPost) options.autoPost = autoPost
+    if (scopeChoice && (scope === 'delta' || scope === 'whole')) options.scope = scope
     onSubmit({ loadoutId, options: Object.keys(options).length > 0 ? options : undefined })
   }
 
@@ -196,6 +206,12 @@ function RunOptionsForm({ settings, loadoutId: initialLoadout, autoPost: initial
             />
           </label>
         </>
+      )}
+      {scopeChoice && (
+        <label className={row}>
+          <span className="text-[12px] text-muted">Scope</span>
+          <Select size="sm" aria-label="Scope" value={scope} onChange={(e) => setScope(e.target.value)} options={SCOPES} />
+        </label>
       )}
       <label className="flex cursor-pointer items-center gap-2 px-2 py-1.5 text-[12px] text-muted">
         <input type="checkbox" className="h-3.5 w-3.5 accent-accent" checked={autoPost} onChange={(e) => setAutoPost(e.target.checked)} />

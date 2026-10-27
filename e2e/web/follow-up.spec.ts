@@ -77,7 +77,9 @@ test("a push alone waits for the author's reply, and the reply starts the follow
   await expect(page.locator('[data-round="2"]')).toBeVisible()
   await expect(page.getByText("started by the author's reply")).toBeVisible()
   await expect(page.getByText("dami-codes's reply")).toBeVisible()
-  await expect(findings(page)).toHaveCount(1)
+  // The delta's one nit made it a clean round, so the whole PR was read again and found one more thing.
+  await expect(findings(page)).toHaveCount(2)
+  await expect(findings(page).filter({ hasText: 'missed earlier' })).toHaveCount(1)
   await expect(missionItem(page, 412)).not.toContainText('new push')
 
   expect(errorsOn(page)).toEqual([])
@@ -100,7 +102,9 @@ test('with automatic follow-ups off in Settings, the user reviews the delta by h
   await expect(statusLine(page)).toContainText('dami-codes replied and pushed')
   await statusLine(page).getByRole('button', { name: 'Review the delta' }).click()
   await expect(page.locator('[data-round="2"]')).toBeVisible()
-  await expect(findings(page)).toHaveCount(1)
+  // One nit in the delta, so the whole PR was read again in the same round and found one more thing.
+  await expect(findings(page)).toHaveCount(2)
+  await expect(findings(page).filter({ hasText: 'missed earlier' })).toHaveCount(1)
   await expect(missionItem(page, 412)).not.toContainText('new push')
   await expect(missionItem(page, 412)).not.toContainText('replied')
 

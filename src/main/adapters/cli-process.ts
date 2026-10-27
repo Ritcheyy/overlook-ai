@@ -173,10 +173,10 @@ export function describeExit(exit: StreamJsonExit): string {
   return exit.code === 0 ? 'without a result' : exit.signal ? `with signal ${exit.signal}` : `with code ${exit.code}`
 }
 
-/** The changes since the previous round, or '' when git cannot produce them or they are too big to inline. */
+/** The changes since the previous round, or '' when git cannot produce them, they are too big to inline, or the round reads the whole change. */
 export async function deltaDiff(exec: ExecFn, req: ReviewRequest): Promise<string> {
   const previous = req.previousRound?.headSha
-  if (!previous) return ''
+  if (!previous || req.scope === 'whole') return ''
   try {
     const res = await exec('git', ['-C', req.worktreePath, 'diff', `${previous}..HEAD`], {
       env: GIT_ENV,

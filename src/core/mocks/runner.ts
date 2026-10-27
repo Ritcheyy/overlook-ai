@@ -1,3 +1,4 @@
+import type { RawFinding } from '../domain'
 import type { ReviewRequest, ReviewResult, RunnerPort } from '../ports'
 import { demoReviewFor } from '../demo/seed'
 
@@ -34,6 +35,32 @@ export class MockRunner implements RunnerPort {
     if (this.failNext) {
       this.failNext = false
       throw new Error('claude exited with code 1: rate limit reached')
+    }
+    if (req.scope === 'whole') {
+      // One catch in code the first round had read, plus a nit the scheduler's full-pass rule drops.
+      const findings: RawFinding[] = [
+        {
+          severity: 'minor',
+          category: 'correctness',
+          title: 'Refund amount is not validated against the order total',
+          body: 'A refund larger than the order goes through; the gateway rejects it later with an opaque error.',
+          file: 'src/refunds/refund.service.ts',
+          line: 52,
+          missedEarlier: true
+        },
+        { severity: 'nit', category: 'style', title: 'Trailing whitespace in README', body: 'One line ends with spaces.', file: 'README.md', line: 1, missedEarlier: true }
+      ]
+      const summary = 'One thing the earlier rounds missed: the refund amount is never checked against the order total. Otherwise the whole change reads clean.'
+      return {
+        findings,
+        summary,
+        verdict: 'comment',
+        briefing: 'Full pass: nothing new to know before merging.',
+        rawOutput: JSON.stringify({ summary, findings }, null, 2),
+        costUsd: 0,
+        durationMs: Date.now() - started,
+        model: 'demo-reviewer'
+      }
     }
     const isFollowUp = !!req.previousRound
     const findings = isFollowUp ? script.findings.filter((f) => f.severity === 'nit' || f.severity === 'praise') : script.findings

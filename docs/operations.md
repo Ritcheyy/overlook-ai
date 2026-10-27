@@ -68,6 +68,16 @@ Every comment that posts findings numbers them and ends with the reply request (
 
 Review the delta by hand from the status line at any time; a manual round is also given any replies.
 
+### Full passes
+
+A delta round only reads the commits pushed since the last posted round, so on its own it cannot approve the whole change. Three rules keep the approval honest:
+
+- A round counts as clean when at most one of its findings is above nit. When a delta round comes back clean, the reviewer re-reads the whole PR in the same round before anything posts, with every earlier finding listed as already raised and the dropped ones as rejected. Its findings join the round's list, tagged "missed earlier" when they sit in code an earlier round had reviewed; nits and praise are left out. The posted comment says "Follow-up on a → b, then a full pass over the whole change."
+- The round after a clean follow-up reads the whole PR from the start, and so does a round started when nothing was pushed (there is no delta to read). The status line says so before you start one, and the Scope choice in the Review options forces either reading.
+- A full pass runs at most once per push, and a full pass never starts another, so a PR cannot loop.
+
+A full pass costs what a first review costs, and a delta-plus-full round can spend up to twice the per-review budget, since the budget applies to each pass. Settings > General > "Full pass before approving" switches off both the in-round pass and the whole-PR round after a clean follow-up; a re-run with nothing pushed and the Scope choice still read the whole PR. If the full pass fails (budget, timeout), the delta findings stand, the verdict is capped at Comments, and the round offers "Retry the full pass", which starts a whole-PR round at the same head.
+
 ## Notifications
 
 Every notification carries its next step. The macOS notification shows one button when you hover over it: Review now on a new review request, Open triage when findings are ready, Review the delta or Review again after a push or a reply, Retry after a failure. macOS only reveals notification buttons on hover, and folds two or more into an Options menu, which is why the notification carries one. Inside the app, the same notification shows as a toast at the bottom right for twelve seconds with all its actions, Ignore included.

@@ -95,6 +95,20 @@ describe('buildComment', () => {
     expect(out).toContain('· 8 findings')
   })
 
+  it('names a full pass in the header and the follow-up line, and tags findings an earlier round missed', () => {
+    const base = { previousHeadSha: PREV_SHA, findings: [makeFinding({ title: 'Old bug', missedEarlier: true }), makeFinding({ title: 'New bug', file: 'z.ts' })] }
+    const whole = buildComment({ mission, round: makeRound({ ...base, index: 3, scope: 'whole' }), settings })
+    expect(whole).toContain(`### Review of ${HEAD_SHA.slice(0, 7)} · round 3 · full pass`)
+    expect(whole).toContain(`Full pass over the whole change at ${HEAD_SHA.slice(0, 7)}, after the review of ${PREV_SHA.slice(0, 7)}.`)
+    expect(whole).toContain('· missed earlier')
+    expect(whole.match(/missed earlier/g)).toHaveLength(1)
+    const both = buildComment({ mission, round: makeRound({ ...base, index: 2, scope: 'delta+whole' }), settings })
+    expect(both).toContain(`### Review of ${HEAD_SHA.slice(0, 7)} · round 2\n`)
+    expect(both).toContain(`Follow-up on ${PREV_SHA.slice(0, 7)} → ${HEAD_SHA.slice(0, 7)}, then a full pass over the whole change.`)
+    const delta = buildComment({ mission, round: makeRound({ ...base, index: 2, scope: 'delta' }), settings })
+    expect(delta).toContain(`Follow-up on ${PREV_SHA.slice(0, 7)} → ${HEAD_SHA.slice(0, 7)}.`)
+  })
+
   it('omits the link when there is no file and #L when there is no line', () => {
     const round = makeRound({
       verdict: 'comment',
