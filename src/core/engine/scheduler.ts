@@ -29,6 +29,7 @@ import type {
 } from '../ipc-contract'
 import type { Ports, WorkspaceContext } from '../ports'
 import { buildComment } from '../comment-builder'
+import { approachChecked } from '../review/prompt'
 import { expandHome, parsePrId, worktreePathFor } from './paths'
 import { OPEN, RETRY } from '../notifications'
 import { applyRunOptions, runBudgetUsd, runEffort, runModel, sanitizeRunOptions, trimReplies } from './run-options'
@@ -399,7 +400,8 @@ export class Scheduler {
       round.summary = result.summary
       round.verdict = result.verdict
       round.briefing = result.briefing
-      if (result.approach) round.approach = result.approach
+      // A follow-up or Security pass never searched the repo for a route, whatever the model filled in.
+      if (result.approach && approachChecked({ previousRound, loadout })) round.approach = result.approach
       round.rawOutput = result.rawOutput
       round.costUsd = result.costUsd
       if (result.model) round.model = result.model

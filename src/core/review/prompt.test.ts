@@ -118,6 +118,7 @@ describe('buildReviewPrompt', () => {
     expect(prompt).toContain('category "approach", before any other finding')
     expect(prompt).toContain('Write it as a proposal backed by that evidence, not as a question.')
     expect(prompt).toContain('When unsure, the approach is sound')
+    expect(prompt).toContain('Approach findings are major or minor only')
     expect(prompt).toContain('"approach": { "verdict": "sound" | "alternative"')
     expect(prompt).toContain('approach, correctness, security')
     expect(buildReviewPrompt(makeRequest({ workspace: makeWorkspace() }))).toContain('Does this repository, or a sibling in the workspace, already provide what it adds?')

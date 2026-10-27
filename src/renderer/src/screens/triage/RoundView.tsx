@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ChevronRight, ExternalLink, MessageSquareReply, Undo2 } from 'lucide-react'
 import type { DropReason, Finding, FindingDecision, Mission, ReviewRound, RoundTrigger, Settings } from '@core/domain'
 import { SEVERITY_ORDER, shortSha } from '@core/domain'
-import { postedFindings } from '@core/comment-builder'
+import { leadsWithApproach, postedFindings } from '@core/comment-builder'
 import { api } from '@/lib/api'
 import { EDITOR_LABELS, editorFileUrl, githubBlobUrl, relatedPrUrl } from '@/lib/links'
 import { formatClock, plural, relativeTime } from '@/lib/format'
@@ -22,7 +22,7 @@ import { useMissionActions } from './useMissionActions'
 export function sortFindings(findings: Finding[]): Finding[] {
   return [...findings].sort((a, b) => {
     // The approach finding reads first; it may make the rest moot.
-    if ((a.category === 'approach') !== (b.category === 'approach')) return a.category === 'approach' ? -1 : 1
+    if (leadsWithApproach(a) !== leadsWithApproach(b)) return leadsWithApproach(a) ? -1 : 1
     return SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity)
   })
 }

@@ -29,9 +29,13 @@ const VERDICT_LABELS: Record<Verdict, string> = {
   comment: '**Comments**'
 }
 
+/** A real alternative for the whole change, which reads before anything about its lines. */
+export function leadsWithApproach(f: Pick<Finding, 'category' | 'severity'>): boolean {
+  return f.category === 'approach' && f.severity !== 'nit' && f.severity !== 'praise'
+}
+
 function compareFindings(a: Finding, b: Finding): number {
-  // A better route for the whole change comes before anything about its lines.
-  if ((a.category === 'approach') !== (b.category === 'approach')) return a.category === 'approach' ? -1 : 1
+  if (leadsWithApproach(a) !== leadsWithApproach(b)) return leadsWithApproach(a) ? -1 : 1
   const bySeverity = SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity)
   if (bySeverity !== 0) return bySeverity
   if (a.file !== b.file) {

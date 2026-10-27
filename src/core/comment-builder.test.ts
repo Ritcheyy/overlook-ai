@@ -83,15 +83,16 @@ describe('buildComment', () => {
         makeFinding({ severity: 'major', title: 'Major no file' }),
         makeFinding({ severity: 'blocker', title: 'Blocker', file: 'm.ts' }),
         makeFinding({ severity: 'praise', title: 'Praise' }),
-        makeFinding({ severity: 'minor', category: 'approach', title: 'Reuse the retry helper' })
+        makeFinding({ severity: 'minor', category: 'approach', title: 'Reuse the retry helper' }),
+        makeFinding({ severity: 'praise', category: 'approach', title: 'Praise for the route' })
       ]
     })
     const out = buildComment({ mission, round, settings })
     const titles = [...out.matchAll(/^#### (\d+)\. (.+)$/gm)].map((m) => `${m[1]} ${m[2]}`)
-    expect(titles).toEqual(['1 Reuse the retry helper', '2 Blocker', '3 Major A', '4 Major Z', '5 Major no file', '6 Nit B', '7 Praise'])
+    expect(titles).toEqual(['1 Reuse the retry helper', '2 Blocker', '3 Major A', '4 Major Z', '5 Major no file', '6 Nit B', '7 Praise', '8 Praise for the route'])
     expect(out).not.toContain('Major dropped')
     expect(out).not.toContain('Blocker pending')
-    expect(out).toContain('· 7 findings')
+    expect(out).toContain('· 8 findings')
   })
 
   it('omits the link when there is no file and #L when there is no line', () => {

@@ -43,16 +43,6 @@ export const REVIEW_JSON_SCHEMA = {
       enum: VERDICTS,
       description: 'request_changes when a blocker or major finding exists, approve when clean, comment otherwise.'
     },
-    approach: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['verdict', 'note'],
-      description: 'First rounds only: the verdict on the route the change took, after searching the repository for what it could reuse.',
-      properties: {
-        verdict: { type: 'string', enum: ['sound', 'alternative'] },
-        note: { type: 'string', description: "One line: why the approach holds up, or the alternative finding's title." }
-      }
-    },
     findings: {
       type: 'array',
       description: 'One entry per distinct problem. Empty when the change is clean.',
@@ -78,6 +68,35 @@ export const REVIEW_JSON_SCHEMA = {
         }
       }
     }
+  }
+}
+
+const APPROACH_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['verdict', 'note'],
+  description: 'The verdict on the route the change took, after searching the repository for what it could reuse.',
+  properties: {
+    verdict: { type: 'string', enum: ['sound', 'alternative'] },
+    note: { type: 'string', description: "One line: why the approach holds up, or the alternative finding's title." }
+  }
+}
+
+/**
+ * The schema for one run. The approach verdict is required on rounds that
+ * judge it and absent otherwise, so a follow-up or Security pass cannot fill
+ * it in without having searched the repository.
+ */
+export type ReviewJsonSchema = Omit<typeof REVIEW_JSON_SCHEMA, 'properties'> & {
+  properties: typeof REVIEW_JSON_SCHEMA.properties & { approach?: typeof APPROACH_SCHEMA }
+}
+
+export function reviewJsonSchema(opts: { approach: boolean }): ReviewJsonSchema {
+  if (!opts.approach) return REVIEW_JSON_SCHEMA
+  return {
+    ...REVIEW_JSON_SCHEMA,
+    required: [...REVIEW_JSON_SCHEMA.required, 'approach'],
+    properties: { ...REVIEW_JSON_SCHEMA.properties, approach: APPROACH_SCHEMA }
   }
 }
 
@@ -213,9 +232,13 @@ export function normaliseFinding(value: unknown): RawFinding | undefined {
     }
   }
 
+  const severity = coerceSeverity(value['severity'])
+  let category = coerceCategory(value['category'])
+  // The approach category is for a real alternative; praise for a good route belongs with the rest.
+  if (category === 'approach' && (severity === 'nit' || severity === 'praise')) category = 'maintainability'
   const finding: RawFinding = {
-    severity: coerceSeverity(value['severity']),
-    category: coerceCategory(value['category']),
+    severity,
+    category,
     title: title ?? firstLine(body ?? ''),
     body: body ?? ''
   }

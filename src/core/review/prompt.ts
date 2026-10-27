@@ -148,6 +148,7 @@ export function buildReviewPrompt(req: ReviewRequest): string {
         '- Is there an existing system, helper or pattern it should build on instead of adding its own?',
         '- Could it be materially shorter or simpler and still do the job?',
         'Report a real alternative as a finding with category "approach", before any other finding. Name the existing code (file and line) or the concrete alternative, and what it saves: files, lines, moving parts. Severity major when the alternative replaces most of the PR, minor otherwise. Write it as a proposal backed by that evidence, not as a question.',
+        'Approach findings are major or minor only: a good route is not praise, and a small reuse is a maintainability nit.',
         'When unsure, the approach is sound: taste is not a finding. Either way fill the "approach" field: "sound" with a one-line reason, or "alternative" with the finding\'s title.'
       ])
     )
