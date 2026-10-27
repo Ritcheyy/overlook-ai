@@ -158,6 +158,7 @@ function toResult(review: ReviewOutput, meta: Meta): ReviewResult {
     verdict: review.verdict
   }
   if (review.briefing) result.briefing = review.briefing
+  if (review.approach) result.approach = review.approach
   if (meta.rawOutput !== undefined) result.rawOutput = meta.rawOutput
   if (meta.costUsd !== undefined) result.costUsd = meta.costUsd
   if (meta.durationMs !== undefined) result.durationMs = meta.durationMs

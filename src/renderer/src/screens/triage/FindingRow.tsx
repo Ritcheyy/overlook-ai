@@ -13,7 +13,7 @@ import { Select } from '@/components/ui/Select'
 import { SeverityDot } from '@/components/app/SeverityDot'
 
 /** Categories with a colour of their own; the rest read as plain labels. */
-const CATEGORY_TONE: Partial<Record<FindingCategory, Tone>> = { integration: 'teal' }
+const CATEGORY_TONE: Partial<Record<FindingCategory, Tone>> = { integration: 'teal', approach: 'amber' }
 
 export const DROP_REASONS: { value: DropReason; label: string }[] = [
   { value: 'product_decision', label: 'Product decision' },

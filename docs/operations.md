@@ -53,6 +53,10 @@ Finder gives an app no `SHELL` and a bare `PATH`. On start the app asks Director
 | Helper processes crash after install | The bundle was copied with a tool that rewrote symlinks | Reinstall with `pnpm app:install` |
 | Dock badge is stale | Badge tracks reviews waiting for your decisions | Open Triage; closing or posting clears it |
 
+## The approach check
+
+Every first round, except the Security pass, opens by judging the route the change took. The reviewer is told to search the repository before answering three questions: is the change needed at all (does the repo, or a workspace sibling, already provide it), is there an existing system, helper or pattern it should build on, and could it be materially shorter or simpler. A real alternative becomes a finding with category `approach`, listed before every other finding in the posted comment; it must name the existing code or the concrete alternative and what it saves, and is major only when it would replace most of the PR. When the reviewer is unsure, the approach counts as sound: taste is not a finding. Either way the round records a one-line verdict, shown at the top of the briefing card, so you can see the check ran. Follow-up rounds never reopen it.
+
 ## Follow-ups and replies
 
 Every comment that posts findings numbers them and ends with the reply request (Settings > General) and a collapsed reply template: a table with one row per finding for the author to fill with fixed, won't fix or disagree. On each poll the app reads the watched PR's conversation and keeps the PR author's comments that came after the last posted round, ignoring the app's own comments by id and everyone else's by login, so a bot commenting on every push starts nothing.

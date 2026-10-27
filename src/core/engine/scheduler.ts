@@ -399,6 +399,7 @@ export class Scheduler {
       round.summary = result.summary
       round.verdict = result.verdict
       round.briefing = result.briefing
+      if (result.approach) round.approach = result.approach
       round.rawOutput = result.rawOutput
       round.costUsd = result.costUsd
       if (result.model) round.model = result.model

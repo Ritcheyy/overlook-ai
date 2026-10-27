@@ -7,10 +7,11 @@
  * the descriptions and are enforced by the coercions below.
  */
 import { z } from 'zod'
-import type { FindingCategory, FindingSeverity, RawFinding, Verdict } from '../domain'
+import type { FindingCategory, FindingSeverity, RawFinding, ReviewApproach, Verdict } from '../domain'
 
 export const SEVERITIES: readonly FindingSeverity[] = ['blocker', 'major', 'minor', 'nit', 'praise']
 export const CATEGORIES: readonly FindingCategory[] = [
+  'approach',
   'correctness',
   'security',
   'performance',
@@ -41,6 +42,16 @@ export const REVIEW_JSON_SCHEMA = {
       type: 'string',
       enum: VERDICTS,
       description: 'request_changes when a blocker or major finding exists, approve when clean, comment otherwise.'
+    },
+    approach: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['verdict', 'note'],
+      description: 'First rounds only: the verdict on the route the change took, after searching the repository for what it could reuse.',
+      properties: {
+        verdict: { type: 'string', enum: ['sound', 'alternative'] },
+        note: { type: 'string', description: "One line: why the approach holds up, or the alternative finding's title." }
+      }
     },
     findings: {
       type: 'array',
@@ -75,6 +86,7 @@ export interface ReviewOutput {
   verdict: Verdict
   findings: RawFinding[]
   briefing?: string
+  approach?: ReviewApproach
 }
 
 const SEVERITY_ALIASES: Record<string, FindingSeverity> = {
@@ -227,12 +239,23 @@ export function normaliseFindings(value: unknown): RawFinding[] {
   return value.map(normaliseFinding).filter((f): f is RawFinding => f !== undefined)
 }
 
+/** `sound` or `alternative` with a one-line note; anything else is dropped rather than shown as a verdict. */
+export function coerceApproach(value: unknown): ReviewApproach | undefined {
+  if (!isRecord(value)) return undefined
+  const verdict = slug(value['verdict'])
+  const note = coerceText(value['note']) ?? coerceText(value['reason']) ?? ''
+  if (verdict === 'sound' || verdict === 'ok' || verdict === 'fine') return { verdict: 'sound', note }
+  if (verdict === 'alternative' || verdict === 'rethink' || verdict === 'reuse') return { verdict: 'alternative', note }
+  return undefined
+}
+
 export const reviewOutputSchema = z
   .object({
     summary: z.unknown(),
     verdict: z.unknown(),
     findings: z.unknown(),
-    briefing: z.unknown()
+    briefing: z.unknown(),
+    approach: z.unknown()
   })
   .superRefine((v, ctx) => {
     if (typeof v.summary !== 'string' && !Array.isArray(v.findings)) {
@@ -247,6 +270,8 @@ export const reviewOutputSchema = z
     }
     const briefing = coerceText(v.briefing)
     if (briefing) out.briefing = briefing
+    const approach = coerceApproach(v.approach)
+    if (approach) out.approach = approach
     return out
   })
 

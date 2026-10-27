@@ -1,4 +1,4 @@
-import type { PullRequest, RawFinding } from '../domain'
+import type { PullRequest, RawFinding, ReviewApproach } from '../domain'
 import { prIdOf, repoRefFromFullName } from '../domain'
 
 export const DEMO_LOGIN = 'ritchey'
@@ -109,6 +109,8 @@ export interface DemoReviewScript {
   summary: string
   /** Markdown shown to the reviewer in triage; never posted. */
   briefing: string
+  /** The first round's verdict on the route the change took. */
+  approach?: ReviewApproach
   verdict: 'approve' | 'request_changes' | 'comment'
   findings: RawFinding[]
   /** Activity lines emitted while "reviewing", in order. */
@@ -128,6 +130,7 @@ const GENERIC_ACTIVITY: DemoReviewScript['activity'] = [
 export const DEMO_REVIEWS: Record<string, DemoReviewScript> = {
   'acme/checkout-api#412': {
     verdict: 'request_changes',
+    approach: { verdict: 'sound', note: 'Builds on RefundService and the existing migration pattern; nothing in the repo already does this.' },
     summary:
       'The idempotency key is derived from order id and amount, so two legitimate partial refunds of the same amount collide. Otherwise the change is solid and well tested.',
     briefing: [
@@ -176,6 +179,7 @@ export const DEMO_REVIEWS: Record<string, DemoReviewScript> = {
   },
   'acme/storefront-web#1203': {
     verdict: 'comment',
+    approach: { verdict: 'sound', note: 'Reuses the cart store; a new persistence layer was not needed and none was added.' },
     summary:
       'Works as described. One real bug around expired promo codes being re-applied, and a question about whether the code should survive logout.',
     briefing: [

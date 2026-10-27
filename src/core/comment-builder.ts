@@ -30,6 +30,8 @@ const VERDICT_LABELS: Record<Verdict, string> = {
 }
 
 function compareFindings(a: Finding, b: Finding): number {
+  // A better route for the whole change comes before anything about its lines.
+  if ((a.category === 'approach') !== (b.category === 'approach')) return a.category === 'approach' ? -1 : 1
   const bySeverity = SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity)
   if (bySeverity !== 0) return bySeverity
   if (a.file !== b.file) {

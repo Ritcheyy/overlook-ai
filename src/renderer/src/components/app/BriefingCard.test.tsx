@@ -25,6 +25,16 @@ describe('BriefingCard', () => {
     expect(screen.getByText('idempotency_key').tagName).toBe('CODE')
   })
 
+  it('heads the briefing with the verdict on the approach, and shows it even without a briefing', () => {
+    render(<BriefingCard round={{ ...round, briefing: 'Adds a column.', approach: { verdict: 'sound', note: 'Builds on the existing refund service.' } }} />)
+    const sound = screen.getByText(/Approach: sound\./).closest('[data-approach]')
+    expect(sound?.getAttribute('data-approach')).toBe('sound')
+    expect(sound?.textContent).toContain('Builds on the existing refund service.')
+    cleanup()
+    render(<BriefingCard round={{ ...round, approach: { verdict: 'alternative', note: 'Reuse PaymentRetry instead of a new queue' } }} />)
+    expect(screen.getByText(/Approach: alternative proposed\./).closest('[data-approach]')?.getAttribute('data-approach')).toBe('alternative')
+  })
+
   it('renders nothing without a briefing', () => {
     expect(render(<BriefingCard round={round} />).container.innerHTML).toBe('')
     expect(render(<BriefingCard round={{ ...round, briefing: '   ' }} />).container.innerHTML).toBe('')

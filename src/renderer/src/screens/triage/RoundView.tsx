@@ -20,7 +20,11 @@ import { FindingRow, type DecisionPatch, type FileLinks } from './FindingRow'
 import { useMissionActions } from './useMissionActions'
 
 export function sortFindings(findings: Finding[]): Finding[] {
-  return [...findings].sort((a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity))
+  return [...findings].sort((a, b) => {
+    // The approach finding reads first; it may make the rest moot.
+    if ((a.category === 'approach') !== (b.category === 'approach')) return a.category === 'approach' ? -1 : 1
+    return SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity)
+  })
 }
 
 /** Which round this is, what started it, the commits it covers and when; shown above the round and the side cards. */
