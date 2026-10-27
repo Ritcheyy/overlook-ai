@@ -92,6 +92,8 @@ export const SLOT_HOLDING_STATES: readonly MissionState[] = ['preparing', 'revie
 
 export type FindingSeverity = 'blocker' | 'major' | 'minor' | 'nit' | 'praise'
 export type FindingCategory =
+  /** A better route for the whole change: not needed, an existing system to build on, or a much shorter shape. */
+  | 'approach'
   | 'correctness'
   | 'security'
   | 'performance'
@@ -104,6 +106,13 @@ export type FindingCategory =
   | 'other'
 
 export type FindingDecision = 'pending' | 'approved' | 'dropped'
+
+/** The reviewer's verdict on the route the PR took, judged once on the first round. */
+export interface ReviewApproach {
+  verdict: 'sound' | 'alternative'
+  /** One line: why it holds up, or the alternative's title. */
+  note: string
+}
 export type DropReason = 'product_decision' | 'false_positive' | 'already_known' | 'not_worth_it' | 'other'
 
 export interface Finding {
@@ -157,6 +166,7 @@ export interface ReviewRound {
   summary: string
   /** Markdown explanation of the PR for the reviewer's own awareness; never posted. */
   briefing?: string
+  approach?: ReviewApproach
   /** The reviewer's summary before the user edited it in triage. */
   originalSummary?: string
   verdict: Verdict

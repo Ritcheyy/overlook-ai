@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   CATEGORIES,
   REVIEW_JSON_SCHEMA,
+  reviewJsonSchema,
   SEVERITIES,
   VERDICTS,
   coerceFile,
@@ -29,6 +30,16 @@ describe('REVIEW_JSON_SCHEMA', () => {
     expect(item.properties.line.type).toBe('integer')
     expect(item.properties.related_pr.type).toBe('string')
     expect(item.required).not.toContain('related_pr')
+  })
+
+  it('requires the approach verdict only on runs that judge it', () => {
+    const judged = reviewJsonSchema({ approach: true })
+    expect(judged.required).toEqual(['summary', 'verdict', 'findings', 'briefing', 'approach'])
+    expect(judged.properties.approach?.properties.verdict.enum).toEqual(['sound', 'alternative'])
+    expect(judged.properties.approach?.required).toEqual(['verdict', 'note'])
+    const plain = reviewJsonSchema({ approach: false })
+    expect(plain).toBe(REVIEW_JSON_SCHEMA)
+    expect(plain.properties.approach).toBeUndefined()
   })
 
   it('serialises to JSON for the --json-schema flag', () => {
@@ -199,6 +210,12 @@ describe('reviewOutputSchema', () => {
     const withBriefing = normaliseReview({ summary: 'Clean.', verdict: 'approve', findings: [], briefing: '  - Adds a flag.\n- No migrations.  ' })
     expect(withBriefing?.briefing).toBe('- Adds a flag.\n- No migrations.')
     expect(normaliseReview({ summary: 'Clean.', verdict: 'approve', findings: [] })).not.toHaveProperty('briefing')
+    expect(normaliseReview({ summary: 'Clean.', verdict: 'approve', findings: [], approach: { verdict: 'Sound', note: ' Builds on X. ' } })?.approach).toEqual({ verdict: 'sound', note: 'Builds on X.' })
+    expect(normaliseReview({ summary: 'Clean.', verdict: 'approve', findings: [], approach: { verdict: 'alternative', reason: 'Reuse Y' } })?.approach).toEqual({ verdict: 'alternative', note: 'Reuse Y' })
+    expect(normaliseReview({ summary: 'Clean.', verdict: 'approve', findings: [], approach: { verdict: 'maybe' } })).not.toHaveProperty('approach')
+    expect(normaliseReview({ summary: 'x', verdict: 'comment', findings: [{ severity: 'major', category: 'Approach', title: 'Reuse Y', body: 'Y does this.' }] })?.findings[0].category).toBe('approach')
+    expect(normaliseFindings([{ severity: 'praise', category: 'approach', title: 'Nice route', body: 'Builds on X.' }])[0].category).toBe('maintainability')
+    expect(normaliseFindings([{ severity: 'nit', category: 'approach', title: 'Reuse helper', body: 'Small.' }])[0].category).toBe('maintainability')
     expect(normaliseReview({ summary: 'Clean.', verdict: 'approve', findings: [], briefing: '   ' })).not.toHaveProperty('briefing')
     expect(normaliseReview({ summary: 'Clean.', verdict: 'approve', findings: [], briefing: { text: 'x' } })).not.toHaveProperty('briefing')
   })

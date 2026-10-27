@@ -44,6 +44,7 @@ export class MockRunner implements RunnerPort {
       briefing: isFollowUp
         ? `Since ${req.previousRound!.headSha.slice(0, 7)}: the author addressed the earlier findings and pushed no unrelated changes.\n- No new endpoints, schema changes, flags or dependencies.\n- Nothing new to know before merging.`
         : script.briefing,
+      ...(!isFollowUp && script.approach && { approach: structuredClone(script.approach) }),
       rawOutput: JSON.stringify({ summary: script.summary, findings }, null, 2),
       costUsd: 0,
       durationMs: Date.now() - started,

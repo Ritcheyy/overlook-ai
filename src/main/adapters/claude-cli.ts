@@ -9,10 +9,10 @@ import { isAbsolute } from 'node:path'
 import type { Activity, Settings } from '@core/domain'
 import { expandHome } from '@core/engine/paths'
 import type { ReviewRequest, ReviewResult, RunnerPort, WorkspaceContext } from '@core/ports'
-import { buildReviewPrompt } from '@core/review/prompt'
+import { approachChecked, buildReviewPrompt } from '@core/review/prompt'
 import { MissingFindingsError, envelopeMeta, parseReviewOutput } from '@core/review/parse'
 import { REPORT_FINDINGS_TOOL, carriesFindings, reviewFromReportFindings } from '@core/review/report-findings'
-import { REVIEW_JSON_SCHEMA } from '@core/review/schema'
+import { reviewJsonSchema } from '@core/review/schema'
 import { resolveClaudePath } from '../environment'
 import { KILL_GRACE_MS, REVIEW_TIMEOUT_MS, deltaDiff, describeExit, driveStreamJson, isRecord, relativeTo, str, type ChildLike, type SpawnFn } from './cli-process'
 import { exec as defaultExec } from './exec'
@@ -71,7 +71,14 @@ export function renderSlashCommand(command: string, prNumber: number): string {
   return command.replaceAll('{number}', String(prNumber)).trim()
 }
 
-export function buildClaudeArgs(settings: Settings, appendSystemPrompt?: string, workspace?: WorkspaceContext): string[] {
+export interface ClaudeArgsOptions {
+  appendSystemPrompt?: string
+  workspace?: WorkspaceContext
+  /** Whether this run judges the approach, which puts the verdict into the schema. */
+  approach: boolean
+}
+
+export function buildClaudeArgs(settings: Settings, { appendSystemPrompt, workspace, approach }: ClaudeArgsOptions): string[] {
   const args = [
     '-p',
     '--output-format',
@@ -84,7 +91,7 @@ export function buildClaudeArgs(settings: Settings, appendSystemPrompt?: string,
     'user',
     '--strict-mcp-config',
     '--json-schema',
-    JSON.stringify(REVIEW_JSON_SCHEMA)
+    JSON.stringify(reviewJsonSchema({ approach }))
   ]
   // The container holds the sibling checkouts and the cross-repo CLAUDE.md.
   if (workspace?.rootPath) args.push('--add-dir', workspace.rootPath)
@@ -198,7 +205,7 @@ export class ClaudeCliRunner implements RunnerPort {
     const reviewPrompt = buildReviewPrompt({ ...req, diff })
     const slash = req.loadout.slashCommand ? renderSlashCommand(req.loadout.slashCommand, req.mission.pr.number) : ''
     const prompt = slash || reviewPrompt
-    const args = buildClaudeArgs(req.settings, slash ? `${HEADLESS_PREAMBLE}\n\n${reviewPrompt}` : undefined, req.workspace)
+    const args = buildClaudeArgs(req.settings, { appendSystemPrompt: slash ? `${HEADLESS_PREAMBLE}\n\n${reviewPrompt}` : undefined, workspace: req.workspace, approach: approachChecked(req) })
     const env: NodeJS.ProcessEnv = { ...this.baseEnv }
     // The CLI refuses to run nested inside another Claude Code session.
     delete env['CLAUDECODE']

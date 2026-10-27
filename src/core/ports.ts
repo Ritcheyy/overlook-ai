@@ -13,6 +13,7 @@ import type {
   PrComment,
   PullRequest,
   RawFinding,
+  ReviewApproach,
   ReviewRound,
   Settings,
   Verdict
@@ -103,6 +104,7 @@ export interface ReviewResult {
   summary: string
   verdict: Verdict
   briefing?: string
+  approach?: ReviewApproach
   rawOutput?: string
   costUsd?: number
   durationMs?: number

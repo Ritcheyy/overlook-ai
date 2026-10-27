@@ -5,7 +5,7 @@ import { defaultSettings } from '@core/loadouts'
 import type { ReviewRequest } from '@core/ports'
 import { BUILT_IN_LOADOUTS, SKILL_MESSAGE_EXAMPLE } from '@core/loadouts'
 import { MAX_INLINE_DIFF_CHARS, buildReviewPrompt } from '@core/review/prompt'
-import { REVIEW_JSON_SCHEMA } from '@core/review/schema'
+import { REVIEW_JSON_SCHEMA, reviewJsonSchema } from '@core/review/schema'
 import { HEAD_SHA, PREV_SHA, makeRequest, makeRound, makeWorkspace } from '@core/review/test-helpers'
 import { ALLOWED_TOOLS, ClaudeCliRunner, HEADLESS_PREAMBLE, type ClaudeCliRunnerOptions, type SpawnFn } from './claude-cli'
 import type { ExecFn, ExecOptions, ExecResult } from './exec'
@@ -136,7 +136,7 @@ describe('ClaudeCliRunner', () => {
       'user',
       '--strict-mcp-config'
     ])
-    expect(call.args[call.args.indexOf('--json-schema') + 1]).toBe(JSON.stringify(REVIEW_JSON_SCHEMA))
+    expect(call.args[call.args.indexOf('--json-schema') + 1]).toBe(JSON.stringify(reviewJsonSchema({ approach: true })))
     expect(call.args[call.args.indexOf('--max-budget-usd') + 1]).toBe('2.5')
     const toolsAt = call.args.indexOf('--allowedTools')
     expect(call.args.slice(toolsAt + 1, toolsAt + 1 + ALLOWED_TOOLS.length)).toEqual([
@@ -183,7 +183,7 @@ describe('ClaudeCliRunner', () => {
     expect(appended).toContain('fix(refunds): make refund creation idempotent per order')
     expect(call.args).toContain('Bash(gh pr diff:*)')
     expect(call.args).toContain('Bash(gh pr view:*)')
-    expect(call.args[call.args.indexOf('--json-schema') + 1]).toBe(JSON.stringify(REVIEW_JSON_SCHEMA))
+    expect(call.args[call.args.indexOf('--json-schema') + 1]).toBe(JSON.stringify(reviewJsonSchema({ approach: true })))
   })
 
   it('writes a prose message override to stdin verbatim and appends the headless preamble', async () => {
@@ -530,6 +530,8 @@ describe('ClaudeCliRunner', () => {
     expect(diff.opts?.timeoutMs).toBe(20_000)
     const prompt = calls[0].child.stdinText
     expect(prompt).toContain(`Output of \`git diff ${PREV_SHA}..HEAD\``)
+    // A follow-up never judges the approach, so the schema must not offer the field.
+    expect(calls[0].args[calls[0].args.indexOf('--json-schema') + 1]).toBe(JSON.stringify(REVIEW_JSON_SCHEMA))
     expect(prompt).toContain('+delta line')
     expect(prompt).toContain(`Round 1 reviewed ${PREV_SHA}`)
   })

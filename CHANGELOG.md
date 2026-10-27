@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- First reviews judge the approach before the lines: whether the change is needed, has an existing system to build on, or could be much shorter, after searching the repository. A real alternative becomes an `approach` finding, first in the comment, naming the existing code and what it saves; a sound approach shows as one line at the top of the briefing. Follow-ups and the Security pass skip it.
 - Notifications carry their next step as buttons: the macOS notification shows the main one on hover and the in-app toast shows them all for a few seconds. Review now or Ignore for a new review request, Open triage for findings, Review the delta or Review again after a push or a reply, Retry after a failure. New review requests from other people are announced with the repo, number, author and size; more than five at once become one summary. Ignore hides a PR until its author pushes again, with an Ignored filter in the Inbox to bring one back.
 - A watched PR that has used all its automatic follow-ups carries an "auto limit reached" tag next to its push and reply markers.
 - The repo and PR number show as a badge in the repo's own colour on the details header and on the Inbox, Triage and Log rows.

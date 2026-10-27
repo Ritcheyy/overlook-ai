@@ -29,7 +29,7 @@ describe('buildReviewPrompt', () => {
     expect(prompt).toContain('No markdown headings inside body')
     expect(prompt).toContain('"verdict": "approve" | "request_changes" | "comment"')
     expect(prompt).toContain('"blocker" | "major" | "minor" | "nit" | "praise"')
-    expect(prompt).toContain('correctness, security, performance, maintainability, testing, product, style, integration, other')
+    expect(prompt).toContain('approach, correctness, security, performance, maintainability, testing, product, style, integration, other')
     expect(prompt).toContain(`"related_pr": "owner/name#123 when the finding depends on another repo's open PR, else omit"`)
     expect(prompt).toContain("- related_pr: owner/name#123 when the finding depends on another repository's open pull request. Omit otherwise.")
   })
@@ -108,6 +108,30 @@ describe('buildReviewPrompt', () => {
     expect(prompt).toContain(`cover what changed since ${PREV_SHA}`)
     expect(prompt).toContain('which earlier findings the author addressed and how')
     expect(prompt).not.toContain('has not read this PR and will not read the diff')
+  })
+
+  it('judges the approach on the first round, with the repo searched first and the verdict in the output', () => {
+    const prompt = buildReviewPrompt(makeRequest())
+    expect(prompt).toContain('## Approach')
+    expect(prompt).toContain('Search the repository first')
+    expect(prompt).toContain('Is the change needed? Does this repository already provide what it adds?')
+    expect(prompt).toContain('category "approach", before any other finding')
+    expect(prompt).toContain('Write it as a proposal backed by that evidence, not as a question.')
+    expect(prompt).toContain('When unsure, the approach is sound')
+    expect(prompt).toContain('Approach findings are major or minor only')
+    expect(prompt).toContain('"approach": { "verdict": "sound" | "alternative"')
+    expect(prompt).toContain('approach, correctness, security')
+    expect(buildReviewPrompt(makeRequest({ workspace: makeWorkspace() }))).toContain('Does this repository, or a sibling in the workspace, already provide what it adds?')
+  })
+
+  it('leaves the approach alone on follow-ups and in the Security pass', () => {
+    const previousRound = makeRound({ id: 'round-1', index: 1, headSha: PREV_SHA, finishedAt: '2026-09-13T10:20:00.000Z' })
+    const followUp = buildReviewPrompt(makeRequest({ diff: '', previousRound, round: makeRound({ id: 'round-2', index: 2, headSha: HEAD_SHA, previousHeadSha: PREV_SHA }) }))
+    expect(followUp).not.toContain('## Approach')
+    expect(followUp).not.toContain('"approach":')
+    const security = buildReviewPrompt(makeRequest({ loadout: { ...BUILT_IN_LOADOUTS[1] } }))
+    expect(security).not.toContain('## Approach')
+    expect(security).not.toContain('"approach":')
   })
 
   it('has no follow-up section on the first round', () => {

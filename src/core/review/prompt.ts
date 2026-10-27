@@ -88,6 +88,11 @@ function workspaceSections(ws: WorkspaceContext): string[] {
   return parts
 }
 
+/** The route is judged once, on the first round, and never by the Security pass, which has its own job. */
+export function approachChecked(req: Pick<ReviewRequest, 'previousRound' | 'loadout'>): boolean {
+  return !req.previousRound && req.loadout.id !== 'security'
+}
+
 export function buildReviewPrompt(req: ReviewRequest): string {
   const { mission, round, loadout, previousRound } = req
   const pr = mission.pr
@@ -134,6 +139,20 @@ export function buildReviewPrompt(req: ReviewRequest): string {
   )
 
   parts.push(section('Review focus', loadout.prompt))
+
+  if (approachChecked(req)) {
+    parts.push(
+      section('Approach', [
+        'Before the line-level review, judge the route this change took. Search the repository first: grep for similar names, look in shared helpers, services and utilities, and at how neighbouring features are built. Then answer:',
+        '- Is the change needed? Does this repository' + (req.workspace ? ', or a sibling in the workspace,' : '') + ' already provide what it adds?',
+        '- Is there an existing system, helper or pattern it should build on instead of adding its own?',
+        '- Could it be materially shorter or simpler and still do the job?',
+        'Report a real alternative as a finding with category "approach", before any other finding. Name the existing code (file and line) or the concrete alternative, and what it saves: files, lines, moving parts. Severity major when the alternative replaces most of the PR, minor otherwise. Write it as a proposal backed by that evidence, not as a question.',
+        'Approach findings are major or minor only: a good route is not praise, and a small reuse is a maintainability nit.',
+        'When unsure, the approach is sound: taste is not a finding. Either way fill the "approach" field: "sound" with a one-line reason, or "alternative" with the finding\'s title.'
+      ])
+    )
+  }
 
   if (previousRound && prevSha) {
     const posted = postedFindings(previousRound)
@@ -211,6 +230,7 @@ export function buildReviewPrompt(req: ReviewRequest): string {
       '  "summary": "2-3 sentences: overall assessment and the most important issue.",',
       '  "verdict": "approve" | "request_changes" | "comment",',
       '  "briefing": "Markdown, at most about 120 words, as described above.",',
+      ...(approachChecked(req) ? ['  "approach": { "verdict": "sound" | "alternative", "note": "One line: why it holds up, or the alternative\'s title." },'] : []),
       '  "findings": [',
       '    {',
       `      "severity": ${SEVERITIES.map((s) => `"${s}"`).join(' | ')},`,
@@ -229,6 +249,7 @@ export function buildReviewPrompt(req: ReviewRequest): string {
       '- summary: 2-3 sentences. Plain prose, no markdown headings.',
       '- verdict: request_changes when any blocker or major finding exists, approve when the change is clean, comment otherwise.',
       '- briefing: markdown, at most about 120 words, following the "Briefing for the reviewer" section. Short lines or bullets; no headings.',
+      ...(approachChecked(req) ? ['- approach: your verdict on the route, as described in the "Approach" section.'] : []),
       '- severity: blocker (must fix before merge), major (should fix), minor, nit, or praise.',
       `- category: one of ${CATEGORIES.join(', ')}. Use integration for a mismatch with another repository this one ships with.`,
       '- title: one line, under 80 characters.',

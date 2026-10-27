@@ -1,16 +1,17 @@
 /**
- * The shape the reviewer must produce. `REVIEW_JSON_SCHEMA` is handed to
- * `claude --json-schema` so the CLI enforces it; the zod schema re-validates
+ * The shape the reviewer must produce. `reviewJsonSchema` builds what is
+ * handed to `claude --json-schema` so the CLI enforces it; the zod schema re-validates
  * whatever comes back and coerces the sloppy variants a model still emits
  * (mixed-case enums, "./" paths, string line numbers). Structured outputs
  * reject range keywords (minimum, maxLength, pattern...), so limits live in
  * the descriptions and are enforced by the coercions below.
  */
 import { z } from 'zod'
-import type { FindingCategory, FindingSeverity, RawFinding, Verdict } from '../domain'
+import type { FindingCategory, FindingSeverity, RawFinding, ReviewApproach, Verdict } from '../domain'
 
 export const SEVERITIES: readonly FindingSeverity[] = ['blocker', 'major', 'minor', 'nit', 'praise']
 export const CATEGORIES: readonly FindingCategory[] = [
+  'approach',
   'correctness',
   'security',
   'performance',
@@ -70,11 +71,41 @@ export const REVIEW_JSON_SCHEMA = {
   }
 }
 
+const APPROACH_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['verdict', 'note'],
+  description: 'The verdict on the route the change took, after searching the repository for what it could reuse.',
+  properties: {
+    verdict: { type: 'string', enum: ['sound', 'alternative'] },
+    note: { type: 'string', description: "One line: why the approach holds up, or the alternative finding's title." }
+  }
+}
+
+/**
+ * The schema for one run. The approach verdict is required on rounds that
+ * judge it and absent otherwise, so a follow-up or Security pass cannot fill
+ * it in without having searched the repository.
+ */
+export type ReviewJsonSchema = Omit<typeof REVIEW_JSON_SCHEMA, 'properties'> & {
+  properties: typeof REVIEW_JSON_SCHEMA.properties & { approach?: typeof APPROACH_SCHEMA }
+}
+
+export function reviewJsonSchema(opts: { approach: boolean }): ReviewJsonSchema {
+  if (!opts.approach) return REVIEW_JSON_SCHEMA
+  return {
+    ...REVIEW_JSON_SCHEMA,
+    required: [...REVIEW_JSON_SCHEMA.required, 'approach'],
+    properties: { ...REVIEW_JSON_SCHEMA.properties, approach: APPROACH_SCHEMA }
+  }
+}
+
 export interface ReviewOutput {
   summary: string
   verdict: Verdict
   findings: RawFinding[]
   briefing?: string
+  approach?: ReviewApproach
 }
 
 const SEVERITY_ALIASES: Record<string, FindingSeverity> = {
@@ -201,9 +232,13 @@ export function normaliseFinding(value: unknown): RawFinding | undefined {
     }
   }
 
+  const severity = coerceSeverity(value['severity'])
+  let category = coerceCategory(value['category'])
+  // The approach category is for a real alternative; praise for a good route belongs with the rest.
+  if (category === 'approach' && (severity === 'nit' || severity === 'praise')) category = 'maintainability'
   const finding: RawFinding = {
-    severity: coerceSeverity(value['severity']),
-    category: coerceCategory(value['category']),
+    severity,
+    category,
     title: title ?? firstLine(body ?? ''),
     body: body ?? ''
   }
@@ -227,12 +262,23 @@ export function normaliseFindings(value: unknown): RawFinding[] {
   return value.map(normaliseFinding).filter((f): f is RawFinding => f !== undefined)
 }
 
+/** `sound` or `alternative` with a one-line note; anything else is dropped rather than shown as a verdict. */
+export function coerceApproach(value: unknown): ReviewApproach | undefined {
+  if (!isRecord(value)) return undefined
+  const verdict = slug(value['verdict'])
+  const note = coerceText(value['note']) ?? coerceText(value['reason']) ?? ''
+  if (verdict === 'sound' || verdict === 'ok' || verdict === 'fine') return { verdict: 'sound', note }
+  if (verdict === 'alternative' || verdict === 'rethink' || verdict === 'reuse') return { verdict: 'alternative', note }
+  return undefined
+}
+
 export const reviewOutputSchema = z
   .object({
     summary: z.unknown(),
     verdict: z.unknown(),
     findings: z.unknown(),
-    briefing: z.unknown()
+    briefing: z.unknown(),
+    approach: z.unknown()
   })
   .superRefine((v, ctx) => {
     if (typeof v.summary !== 'string' && !Array.isArray(v.findings)) {
@@ -247,6 +293,8 @@ export const reviewOutputSchema = z
     }
     const briefing = coerceText(v.briefing)
     if (briefing) out.briefing = briefing
+    const approach = coerceApproach(v.approach)
+    if (approach) out.approach = approach
     return out
   })
 
