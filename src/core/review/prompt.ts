@@ -127,7 +127,7 @@ function fullPassSection(req: ReviewRequest, previousRound: ReviewRound): string
     // The author may be fixing the last finding right now; a fresh read must still say whether it is fixed.
     lines.push(
       `First check the findings posted in round ${previousRound.index} against this head. In your summary, say which are resolved and which still stand. A posted finding that still stands may be raised again, with the evidence, and the verdict cannot be approve while one does.`,
-      'Do not repeat findings that are resolved or were rejected.'
+      'Do not repeat findings that are resolved or were rejected. A finding you raise again because it still stands was not missed: set its "missed_earlier" to false.'
     )
   }
   lines.push(

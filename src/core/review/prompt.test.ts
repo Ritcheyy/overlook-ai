@@ -158,6 +158,7 @@ describe('buildReviewPrompt', () => {
     // A whole-PR round started on its own still has to say whether the last findings were fixed.
     expect(prompt).toContain('First check the findings posted in round 1 against this head. In your summary, say which are resolved and which still stand.')
     expect(prompt).toContain('the verdict cannot be approve while one does')
+    expect(prompt).toContain('A finding you raise again because it still stands was not missed: set its "missed_earlier" to false.')
     expect(prompt).not.toContain('The delta pass already checked')
     const chained = buildReviewPrompt(makeRequest({ mission, round: round2, previousRound: round1, diff: '', scope: 'whole', fullPassAfterDelta: true }))
     expect(chained).toContain('The delta pass already checked the findings of round 1 against this head. Do not repeat any of the above')
