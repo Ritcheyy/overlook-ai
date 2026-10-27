@@ -134,6 +134,41 @@ describe('buildReviewPrompt', () => {
     expect(security).not.toContain('"approach":')
   })
 
+  it('turns a whole-PR follow-up into a full pass that knows every earlier finding and marks what was missed', () => {
+    const round1 = makeRound({
+      id: 'round-1',
+      index: 1,
+      headSha: PREV_SHA,
+      postedAt: '2026-09-13T10:30:00.000Z',
+      findings: [makeFinding({ id: 'f1', title: 'Posted major', severity: 'major', decision: 'approved' }), makeFinding({ id: 'f2', title: 'Dropped nit', severity: 'nit', decision: 'dropped', dropReason: 'not_worth_it' })]
+    })
+    const round2 = makeRound({ id: 'round-2', index: 2, headSha: HEAD_SHA, previousHeadSha: PREV_SHA, findings: [makeFinding({ id: 'f3', title: 'Delta minor', severity: 'minor', decision: 'pending' })] })
+    const mission = makeMission({ rounds: [round1, round2] })
+    const prompt = buildReviewPrompt(makeRequest({ mission, round: round2, previousRound: round1, diff: '', scope: 'whole' }))
+    expect(prompt).toContain('## Full pass over the whole change')
+    expect(prompt).toContain(`Round 1 reviewed ${PREV_SHA.slice(0, 7)}; this is a full pass over the whole change at ${HEAD_SHA}, with fresh eyes.`)
+    expect(prompt).toContain('git diff origin/main...HEAD`, including code no recent push touched')
+    expect(prompt).toContain('Posted in round 1, numbered as the author saw them')
+    expect(prompt).toContain('1. major · Posted major')
+    expect(prompt).toContain('Rejected by the human reviewer in round 1:')
+    expect(prompt).toContain('Dropped nit')
+    expect(prompt).toContain('Found by the delta pass on this head, not yet posted:')
+    expect(prompt).toContain('- minor · Delta minor')
+    expect(prompt).toContain('No nits, no praise.')
+    expect(prompt).toContain('"missed_earlier": true | false')
+    expect(prompt).toContain('No inline diff was provided. Run `git diff origin/main...HEAD`')
+    expect(prompt).not.toContain('## Follow-up round')
+    expect(prompt).not.toContain('## Approach')
+    expect(prompt).not.toContain('"approach":')
+  })
+
+  it('keeps the delta framing and leaves missed_earlier out of a delta follow-up', () => {
+    const previousRound = makeRound({ id: 'round-1', index: 1, headSha: PREV_SHA, finishedAt: '2026-09-13T10:20:00.000Z' })
+    const prompt = buildReviewPrompt(makeRequest({ diff: '', previousRound, round: makeRound({ id: 'round-2', index: 2, headSha: HEAD_SHA, previousHeadSha: PREV_SHA }), scope: 'delta' }))
+    expect(prompt).toContain('## Follow-up round')
+    expect(prompt).not.toContain('missed_earlier')
+  })
+
   it('has no follow-up section on the first round', () => {
     expect(buildReviewPrompt(makeRequest())).not.toContain('## Follow-up round')
   })

@@ -175,6 +175,7 @@ function TriageFooter({ mission, round, readOnly, preview, onPreview }: { missio
         icon={<RotateCcw className="h-3.5 w-3.5" aria-hidden />}
         loadoutId={mission.loadoutId}
         autoPost={mission.autoPost}
+        scopeChoice
         disabled={readOnly}
         title="Start a new round on the current head"
         onStart={({ loadoutId, options }) => actions.rerun(mission.id, loadoutId, options)}

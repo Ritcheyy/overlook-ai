@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import type { AppSnapshot, Mission, PullRequest, Settings, Workspace } from '../domain'
+import type { AppSnapshot, Mission, PullRequest, RunOptions, Settings, Workspace } from '../domain'
 import { latestRound, repoRefFromFullName } from '../domain'
 import type { Api, Engine } from '../ipc-contract'
 import type { PersistedState, ReviewRequest, ReviewResult, RunnerPort } from '../ports'
@@ -26,6 +26,8 @@ class GateRunner implements RunnerPort {
   failWith?: Error
   /** Reported before blocking, the way the CLI names its model at the start. */
   modelFirst?: string
+  /** Thrown by every whole-PR pass while set, the way a budget or timeout ends one. */
+  failWholePass?: Error
   private waiters: Array<() => void> = []
 
   get calls(): ReviewRequest[] {
@@ -46,6 +48,7 @@ class GateRunner implements RunnerPort {
       })
     }
     const result = await this.inner.review(req)
+    if (this.failWholePass && req.scope === 'whole') throw this.failWholePass
     if (this.failWith) {
       const err = this.failWith
       this.failWith = undefined
@@ -132,6 +135,22 @@ const waitForState = (h: Harness, id: string, state: Mission['state']) =>
 function authorReplies(h: Harness, prId: string, body?: string) {
   h.clock.advance(1000)
   return h.github.simulateReply(prId, body)
+}
+
+/** Approves every finding of the latest round and posts it, as the user would from triage. */
+async function approveAndPost(h: Harness, id: string): Promise<Mission> {
+  const m = missionOf(await h.api.getSnapshot(), id)
+  await h.api.setFindingDecisions({ missionId: id, roundId: latestRound(m)!.id, decision: 'approved' })
+  await h.api.postComment(id)
+  return waitForState(h, id, 'watching')
+}
+
+/** A manual re-run after a push, which is where a delta round comes from. */
+async function pushAndRerun(h: Harness, prId: string, id: string, options?: RunOptions): Promise<Mission> {
+  h.github.simulatePush(prId)
+  await h.api.refreshInbox()
+  await h.api.rerunMission(id, undefined, options)
+  return waitForState(h, id, 'needs_you')
 }
 
 afterEach(async () => {
@@ -526,11 +545,11 @@ describe('engine', () => {
   })
 
   it('defaults the engine fields of a settings file saved before they existed', async () => {
-    const { reviewerEngine: _engine, cursorPath: _path, cursorModel: _model, ...older } = defaultSettings({ claudeModel: 'opus' })
+    const { reviewerEngine: _engine, cursorPath: _path, cursorModel: _model, fullPassBeforeApproval: _full, ...older } = defaultSettings({ claudeModel: 'opus' })
     const store = new MemoryStore({ missions: [], inbox: [], settings: older as Settings })
     const h = await makeEngine({ store })
     const snapshot = await waitFor(h, () => true)
-    expect(snapshot.settings).toMatchObject({ reviewerEngine: 'claude', cursorPath: 'agent', cursorModel: '', claudeModel: 'opus' })
+    expect(snapshot.settings).toMatchObject({ reviewerEngine: 'claude', cursorPath: 'agent', cursorModel: '', claudeModel: 'opus', fullPassBeforeApproval: true })
   })
 
   it('announces a new PR from someone else once, with its size and two actions, but never on the first poll', async () => {
@@ -609,6 +628,95 @@ describe('engine', () => {
     const b = await h.api.dispatch({ prId: PR_1203 })
     await waitForState(h, b.id, 'needs_you')
     expect(h.notifier.notifications.at(-1)).toMatchObject({ missionId: b.id, actions: [{ id: 'open', label: 'Open triage' }] })
+  })
+
+  it('reads the whole PR inside the same round when a delta comes back clean', async () => {
+    const h = await makeEngine()
+    const a = await h.api.dispatch({ prId: PR_412 })
+    await waitForState(h, a.id, 'needs_you')
+    await approveAndPost(h, a.id)
+    const m = await pushAndRerun(h, PR_412, a.id)
+    const round = m.rounds[1]
+    expect(h.runner.calls.map((c) => c.scope)).toEqual([undefined, 'delta', 'whole'])
+    // The full pass gets the PR diff and the delta's own findings as already raised.
+    expect(h.runner.calls[2].diff).toContain('diff --git')
+    expect(h.runner.calls[2].round.findings.length).toBeGreaterThan(0)
+    expect(round.scope).toBe('delta+whole')
+    expect(round.summary).toContain('Full pass: The whole change reads clean')
+    expect(round.verdict).toBe('approve')
+    expect(round.findings.length).toBeGreaterThan(0)
+    expect(round.findings.every((f) => f.severity === 'nit' || f.severity === 'praise')).toBe(true)
+    expect(round.fullPassError).toBeUndefined()
+    expect(m.timeline.some((e) => e.note?.startsWith('full pass over the whole PR at'))).toBe(true)
+  })
+
+  it('leaves a clean delta alone when the full pass is switched off', async () => {
+    const h = await makeEngine({ settings: { fullPassBeforeApproval: false } })
+    const a = await h.api.dispatch({ prId: PR_412 })
+    await waitForState(h, a.id, 'needs_you')
+    await approveAndPost(h, a.id)
+    const m = await pushAndRerun(h, PR_412, a.id)
+    expect(h.runner.calls.map((c) => c.scope)).toEqual([undefined, 'delta'])
+    expect(m.rounds[1].scope).toBe('delta')
+    expect(m.rounds[1].summary).not.toContain('Full pass:')
+  })
+
+  it('reads the whole PR on the round after a clean follow-up, and when nothing was pushed', async () => {
+    const h = await makeEngine()
+    const a = await h.api.dispatch({ prId: PR_412 })
+    await waitForState(h, a.id, 'needs_you')
+    await approveAndPost(h, a.id)
+    await pushAndRerun(h, PR_412, a.id)
+    await approveAndPost(h, a.id)
+    const third = await pushAndRerun(h, PR_412, a.id)
+    expect(third.rounds[2].scope).toBe('whole')
+    expect(h.runner.calls.at(-1)).toMatchObject({ scope: 'whole' })
+    expect(h.runner.calls.at(-1)?.diff).toContain('diff --git')
+    expect(h.runner.calls).toHaveLength(4)
+    await approveAndPost(h, a.id)
+    await h.api.rerunMission(a.id)
+    const fourth = await waitForState(h, a.id, 'needs_you')
+    expect(fourth.rounds[3].scope).toBe('whole')
+    expect(fourth.rounds[3].headSha).toBe(fourth.rounds[2].headSha)
+    expect(h.runner.calls).toHaveLength(5)
+  })
+
+  it('keeps the delta findings and caps the verdict when the full pass fails, then retries just the full pass', async () => {
+    const h = await makeEngine()
+    h.runner.failWholePass = Object.assign(new Error('Budget of $3 exceeded'), { costUsd: 1.2 })
+    const a = await h.api.dispatch({ prId: PR_412 })
+    await waitForState(h, a.id, 'needs_you')
+    await approveAndPost(h, a.id)
+    const m = await pushAndRerun(h, PR_412, a.id)
+    const round = m.rounds[1]
+    expect(round.scope).toBe('delta')
+    expect(round.fullPassError).toBe('Budget of $3 exceeded')
+    expect(round.verdict).toBe('comment')
+    expect(round.findings.length).toBeGreaterThan(0)
+    expect(round.costUsd).toBe(1.2)
+    expect(m.timeline.some((e) => e.note === 'full pass failed; verdict capped at comment')).toBe(true)
+    expect(m.state).toBe('needs_you')
+
+    h.runner.failWholePass = undefined
+    await h.api.rerunMission(a.id, undefined, { scope: 'whole' })
+    const after = await waitForState(h, a.id, 'needs_you')
+    expect(after.rounds).toHaveLength(3)
+    expect(after.rounds[2]).toMatchObject({ scope: 'whole', verdict: 'approve', headSha: round.headSha })
+    expect(h.runner.calls.at(-1)).toMatchObject({ scope: 'whole' })
+  })
+
+  it('runs the full pass at most once per head', async () => {
+    const h = await makeEngine()
+    const a = await h.api.dispatch({ prId: PR_412 })
+    await waitForState(h, a.id, 'needs_you')
+    await approveAndPost(h, a.id)
+    await pushAndRerun(h, PR_412, a.id)
+    expect(h.runner.calls).toHaveLength(3)
+    await approveAndPost(h, a.id)
+    await h.api.rerunMission(a.id, undefined, { scope: 'delta' })
+    const m = await waitForState(h, a.id, 'needs_you')
+    expect(m.rounds[2].scope).toBe('delta')
+    expect(h.runner.calls).toHaveLength(4)
   })
 
   it('records the model the runner reports while the review is still running', async () => {
@@ -1366,7 +1474,8 @@ describe('engine', () => {
       missionId: a.id,
       actions: [rerun('Review the delta'), OPEN]
     })
-    expect(h.runner.calls).toHaveLength(2)
+    // Round 2's delta came back clean, so it read the whole PR as well.
+    expect(h.runner.calls.map((c) => c.scope)).toEqual([undefined, 'delta', 'whole'])
 
     // Nothing new: later polls stay quiet instead of nagging.
     const count = h.notifier.notifications.length

@@ -35,6 +35,18 @@ export class MockRunner implements RunnerPort {
       this.failNext = false
       throw new Error('claude exited with code 1: rate limit reached')
     }
+    if (req.scope === 'whole') {
+      return {
+        findings: [],
+        summary: 'The whole change reads clean; nothing the earlier rounds missed.',
+        verdict: 'approve',
+        briefing: 'Full pass: nothing new to know before merging.',
+        rawOutput: JSON.stringify({ summary: 'The whole change reads clean; nothing the earlier rounds missed.', findings: [] }, null, 2),
+        costUsd: 0,
+        durationMs: Date.now() - started,
+        model: 'demo-reviewer'
+      }
+    }
     const isFollowUp = !!req.previousRound
     const findings = isFollowUp ? script.findings.filter((f) => f.severity === 'nit' || f.severity === 'praise') : script.findings
     return {

@@ -90,6 +90,8 @@ export interface ReviewRequest {
   previousRound?: ReviewRound
   /** The author's replies to the previous round, oldest first. */
   replies?: PrComment[]
+  /** Follow-ups only: the commits since the previous round, or the whole change with the earlier findings as already raised. */
+  scope?: 'delta' | 'whole'
   /** Sibling repos, the reviewer's open PRs in them, and the container's notes; absent for single-repo reviews. */
   workspace?: WorkspaceContext
   settings: Settings

@@ -17,6 +17,8 @@ describe('sanitizeRunOptions', () => {
     expect(sanitizeRunOptions({ model: ' sonnet ', effort: 'low', maxBudgetUsd: 2, autoPost: true })).toEqual({ model: 'sonnet', effort: 'low', maxBudgetUsd: 2, autoPost: true })
     expect(sanitizeRunOptions({ effort: 'extreme' as never, maxBudgetUsd: -1 })).toBeUndefined()
     expect(sanitizeRunOptions({ model: '', effort: '' })).toEqual({ model: '', effort: '' })
+    expect(sanitizeRunOptions({ scope: 'whole' })).toEqual({ scope: 'whole' })
+    expect(sanitizeRunOptions({ scope: 'everything' as never })).toBeUndefined()
     expect(sanitizeRunOptions(undefined)).toBeUndefined()
   })
 })

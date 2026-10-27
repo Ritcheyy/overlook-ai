@@ -76,9 +76,11 @@ export interface ClaudeArgsOptions {
   workspace?: WorkspaceContext
   /** Whether this run judges the approach, which puts the verdict into the schema. */
   approach: boolean
+  /** Whether this run is a full pass, whose findings say if an earlier round missed them. */
+  missedEarlier?: boolean
 }
 
-export function buildClaudeArgs(settings: Settings, { appendSystemPrompt, workspace, approach }: ClaudeArgsOptions): string[] {
+export function buildClaudeArgs(settings: Settings, { appendSystemPrompt, workspace, approach, missedEarlier }: ClaudeArgsOptions): string[] {
   const args = [
     '-p',
     '--output-format',
@@ -91,7 +93,7 @@ export function buildClaudeArgs(settings: Settings, { appendSystemPrompt, worksp
     'user',
     '--strict-mcp-config',
     '--json-schema',
-    JSON.stringify(reviewJsonSchema({ approach }))
+    JSON.stringify(reviewJsonSchema({ approach, missedEarlier }))
   ]
   // The container holds the sibling checkouts and the cross-repo CLAUDE.md.
   if (workspace?.rootPath) args.push('--add-dir', workspace.rootPath)
@@ -205,7 +207,7 @@ export class ClaudeCliRunner implements RunnerPort {
     const reviewPrompt = buildReviewPrompt({ ...req, diff })
     const slash = req.loadout.slashCommand ? renderSlashCommand(req.loadout.slashCommand, req.mission.pr.number) : ''
     const prompt = slash || reviewPrompt
-    const args = buildClaudeArgs(req.settings, { appendSystemPrompt: slash ? `${HEADLESS_PREAMBLE}\n\n${reviewPrompt}` : undefined, workspace: req.workspace, approach: approachChecked(req) })
+    const args = buildClaudeArgs(req.settings, { appendSystemPrompt: slash ? `${HEADLESS_PREAMBLE}\n\n${reviewPrompt}` : undefined, workspace: req.workspace, approach: approachChecked(req), missedEarlier: req.scope === 'whole' })
     const env: NodeJS.ProcessEnv = { ...this.baseEnv }
     // The CLI refuses to run nested inside another Claude Code session.
     delete env['CLAUDECODE']

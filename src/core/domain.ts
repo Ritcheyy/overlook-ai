@@ -128,6 +128,8 @@ export interface Finding {
   suggestion?: string
   /** `owner/name#number` of a PR in another repo this finding depends on. */
   relatedPr?: string
+  /** Found by a full pass in code an earlier round had already reviewed. */
+  missedEarlier?: boolean
   decision: FindingDecision
   dropReason?: DropReason
   dropNote?: string
@@ -145,10 +147,19 @@ export type RoundTrigger = 'dispatch' | 'rerun' | 'retry' | 'reply'
  * Choices made for one run in place of the settings defaults. Empty strings
  * mean "let the CLI decide", unlike an absent key, which keeps the setting.
  */
+/**
+ * What a follow-up round reads: the commits since the last posted round, or
+ * the whole change again. `delta+whole` is a delta that came back clean and
+ * was followed by a full pass in the same round.
+ */
+export type ReviewScope = 'delta' | 'whole' | 'delta+whole'
+
 export interface RunOptions {
   model?: string
   effort?: '' | NonNullable<Settings['claudeEffort']>
   maxBudgetUsd?: number
+  /** Forces what the round reads; otherwise the delta, or the whole PR after a clean follow-up. */
+  scope?: 'delta' | 'whole'
   /** Post the findings without stopping for triage. */
   autoPost?: boolean
 }
@@ -167,6 +178,10 @@ export interface ReviewRound {
   /** Markdown explanation of the PR for the reviewer's own awareness; never posted. */
   briefing?: string
   approach?: ReviewApproach
+  /** Follow-up rounds only; a first round always reads the whole change. */
+  scope?: ReviewScope
+  /** The full pass after a clean delta failed: the delta findings stand and the verdict is capped at comment. */
+  fullPassError?: string
   /** The reviewer's summary before the user edited it in triage. */
   originalSummary?: string
   verdict: Verdict
@@ -336,6 +351,12 @@ export interface Settings {
    * unattended.
    */
   maxAutoRoundsPerMission: number
+  /**
+   * When a follow-up finds at most one thing above a nit, re-read the whole
+   * PR in the same round before anything posts, so an approval never rests on
+   * the pushed commits alone. Such a round may spend twice the budget.
+   */
+  fullPassBeforeApproval: boolean
   /** Shell command run inside a fresh worktree, keyed by `owner/name`. */
   prepareCommands: Record<string, string>
   /** Symlink node_modules from the main checkout into new worktrees. */

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ChevronRight, ExternalLink, MessageSquareReply, Undo2 } from 'lucide-react'
 import type { DropReason, Finding, FindingDecision, Mission, ReviewRound, RoundTrigger, Settings } from '@core/domain'
-import { SEVERITY_ORDER, shortSha } from '@core/domain'
+import { SEVERITY_ORDER, latestRound, shortSha } from '@core/domain'
 import { leadsWithApproach, postedFindings } from '@core/comment-builder'
 import { api } from '@/lib/api'
 import { EDITOR_LABELS, editorFileUrl, githubBlobUrl, relatedPrUrl } from '@/lib/links'
@@ -42,8 +42,32 @@ export function RoundMeta({ round, now }: { round: ReviewRound; now: number }) {
       <span className="font-mono" title={round.headSha}>
         {round.previousHeadSha ? `${shortSha(round.previousHeadSha)}..${shortSha(round.headSha)}` : shortSha(round.headSha)}
       </span>
+      {round.scope && round.scope !== 'delta' && (
+        <>
+          <span aria-hidden>·</span>
+          <span>{round.scope === 'whole' ? 'full pass' : 'delta, then a full pass'}</span>
+        </>
+      )}
       <span aria-hidden>·</span>
       <span title={round.startedAt}>started {relativeTime(round.startedAt, now)}</span>
+    </div>
+  )
+}
+
+/** The full pass after a clean delta failed; the delta findings stand, the verdict is capped, and the pass can be retried. */
+function FullPassFailed({ mission, round }: { mission: Mission; round: ReviewRound }) {
+  const actions = useMissionActions()
+  const canRetry = ['needs_you', 'watching', 'failed'].includes(mission.state) && latestRound(mission)?.id === round.id
+  return (
+    <div role="alert" className="flex flex-wrap items-center gap-3 rounded-lg border border-amber/30 bg-amber/10 px-3.5 py-2.5 text-[12.5px]">
+      <span className="min-w-0 flex-1 text-ink/85">
+        The full pass over the whole PR failed, so this round only read the delta and its verdict is capped at Comments: {round.fullPassError}
+      </span>
+      {canRetry && (
+        <Button size="sm" variant="secondary" onClick={() => void actions.rerun(mission.id, undefined, { scope: 'whole' })}>
+          Retry the full pass
+        </Button>
+      )}
     </div>
   )
 }
@@ -229,6 +253,7 @@ export function RoundView({ mission, round, settings, triage, readOnly, now }: R
 
   return (
     <div className="flex flex-col gap-4" data-round={round.index}>
+      {round.fullPassError && <FullPassFailed mission={mission} round={round} />}
       <RepliesCard round={round} />
       <BriefingCard round={round} title={round.previousHeadSha ? 'What changed' : undefined} />
       <SummaryCard mission={mission} round={round} editable={canEditSummary} />

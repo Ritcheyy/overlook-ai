@@ -106,6 +106,7 @@ function sanitizeSettings(raw: unknown, defaults: Settings): Settings {
   }
   if (!Number.isInteger(merged.maxPrAgeDays) || merged.maxPrAgeDays < 0) merged.maxPrAgeDays = defaults.maxPrAgeDays
   if (typeof merged.replyRequest !== 'string') merged.replyRequest = defaults.replyRequest
+  if (typeof merged.fullPassBeforeApproval !== 'boolean') merged.fullPassBeforeApproval = defaults.fullPassBeforeApproval
   if (!FILE_LINK_TARGETS.includes(merged.fileLinks)) merged.fileLinks = defaults.fileLinks
   // An empty model is a deliberate "CLI default"; only a missing key takes the app default.
   if (merged.claudeModel === undefined) merged.claudeModel = defaults.claudeModel

@@ -127,6 +127,11 @@ export function FindingRow({ finding, number, triage, readOnly, expanded, onTogg
         <Chip tone={CATEGORY_TONE[finding.category] ?? 'muted'} className="font-normal capitalize">
           {finding.category}
         </Chip>
+        {finding.missedEarlier && (
+          <Chip tone="amber" className="font-normal" title="Found by a full pass in code an earlier round had reviewed">
+            missed earlier
+          </Chip>
+        )}
         {location && (
           <span className="inline-flex min-w-0 items-center gap-0.5">
             {links?.editor ? (

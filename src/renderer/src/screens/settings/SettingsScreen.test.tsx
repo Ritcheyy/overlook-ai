@@ -44,6 +44,16 @@ const customInput = () => screen.queryByLabelText('Custom model id') as HTMLInpu
 beforeEach(() => vi.clearAllMocks())
 afterEach(cleanup)
 
+describe('SettingsScreen general section', () => {
+  it('saves the full-pass switch', () => {
+    renderSettings()
+    const toggle = screen.getByRole('switch', { name: 'Full pass before approving' })
+    expect(toggle.getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(toggle)
+    expect(api.updateSettings).toHaveBeenCalledWith({ fullPassBeforeApproval: false })
+  })
+})
+
 describe('SettingsScreen engine section', () => {
   it('swaps the Claude fields for the Cursor ones when Cursor is selected', () => {
     renderSettings()

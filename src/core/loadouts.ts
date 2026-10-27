@@ -71,6 +71,7 @@ export function defaultSettings(overrides: Partial<Settings> = {}): Settings {
     worktreeRoot: '~/.overlook/worktrees',
     autoPostRepos: [],
     maxAutoRoundsPerMission: 0,
+    fullPassBeforeApproval: true,
     prepareCommands: {},
     linkNodeModules: true,
     notifications: true,

@@ -40,6 +40,10 @@ describe('REVIEW_JSON_SCHEMA', () => {
     const plain = reviewJsonSchema({ approach: false })
     expect(plain).toBe(REVIEW_JSON_SCHEMA)
     expect(plain.properties.approach).toBeUndefined()
+    const fullPass = reviewJsonSchema({ approach: false, missedEarlier: true })
+    expect(fullPass.properties.findings.items.properties).toHaveProperty('missed_earlier')
+    expect(fullPass.properties.approach).toBeUndefined()
+    expect(REVIEW_JSON_SCHEMA.properties.findings.items.properties).not.toHaveProperty('missed_earlier')
   })
 
   it('serialises to JSON for the --json-schema flag', () => {
@@ -216,6 +220,9 @@ describe('reviewOutputSchema', () => {
     expect(normaliseReview({ summary: 'x', verdict: 'comment', findings: [{ severity: 'major', category: 'Approach', title: 'Reuse Y', body: 'Y does this.' }] })?.findings[0].category).toBe('approach')
     expect(normaliseFindings([{ severity: 'praise', category: 'approach', title: 'Nice route', body: 'Builds on X.' }])[0].category).toBe('maintainability')
     expect(normaliseFindings([{ severity: 'nit', category: 'approach', title: 'Reuse helper', body: 'Small.' }])[0].category).toBe('maintainability')
+    expect(normaliseFindings([{ severity: 'minor', category: 'testing', title: 'x', body: 'y', missed_earlier: true }])[0].missedEarlier).toBe(true)
+    expect(normaliseFindings([{ severity: 'minor', category: 'testing', title: 'x', body: 'y', missedEarlier: false }])[0].missedEarlier).toBe(false)
+    expect(normaliseFindings([{ severity: 'minor', category: 'testing', title: 'x', body: 'y', missed_earlier: 'yes' }])[0]).not.toHaveProperty('missedEarlier')
     expect(normaliseReview({ summary: 'Clean.', verdict: 'approve', findings: [], briefing: '   ' })).not.toHaveProperty('briefing')
     expect(normaliseReview({ summary: 'Clean.', verdict: 'approve', findings: [], briefing: { text: 'x' } })).not.toHaveProperty('briefing')
   })

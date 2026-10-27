@@ -1,6 +1,7 @@
 import type { Mission, Settings, Slot } from '@core/domain'
 import { lastPostedRound, latestRound, shortSha } from '@core/domain'
 import { autoFollowUpAllowed, followUpHeldBecause } from '@core/engine/poller'
+import { nextScope } from '@core/engine/scope'
 import type { Tone } from '@/components/ui/Chip'
 import { relativeTime } from '@/lib/format'
 import { hasReply } from '@/lib/review'
@@ -30,6 +31,8 @@ export function statusFor(mission: Mission | undefined, settings: Settings, slot
   const posted = lastPostedRound(mission)
   const author = mission.pr.author
   const head = shortSha(mission.pr.headSha)
+  // Said wherever a re-run is offered, since a whole-PR round costs what a first one does.
+  const whole = nextScope(mission, mission.pr.headSha) === 'whole' ? ' The next round reads the whole PR.' : ''
   switch (mission.state) {
     case 'queued':
       return { tone: 'muted', icon: 'queue', text: 'Queued. It starts when a reviewer is free.', action: 'cancel' }
@@ -41,7 +44,7 @@ export function statusFor(mission: Mission | undefined, settings: Settings, slot
       return { tone: 'accent', icon: 'work', text: 'Posting the comment to GitHub.', action: 'none' }
     case 'needs_you': {
       if (mission.error) return { tone: 'rose', icon: 'alert', text: firstLine(mission.error), action: 'none' }
-      if (mission.stale) return { tone: 'amber', icon: 'push', text: `${author} pushed ${head} after this round, so its findings may be out of date.`, action: 'review_delta' }
+      if (mission.stale) return { tone: 'amber', icon: 'push', text: `${author} pushed ${head} after this round, so its findings may be out of date.${whole}`, action: 'review_delta' }
       const count = round?.findings.length ?? 0
       return {
         tone: 'amber',
@@ -57,12 +60,12 @@ export function statusFor(mission: Mission | undefined, settings: Settings, slot
       const since = posted ? `round ${posted.index}` : 'the last round'
       if (replied && mission.stale) {
         const held = autoFollowUpAllowed(mission, settings) ? 'A follow-up is about to start.' : followUpHeldBecause(mission, settings)
-        return { tone: 'teal', icon: 'reply', text: `${author} replied and pushed ${head}. ${held}`, action: 'review_delta' }
+        return { tone: 'teal', icon: 'reply', text: `${author} replied and pushed ${head}. ${held}${whole}`, action: 'review_delta' }
       }
-      if (replied) return { tone: 'teal', icon: 'reply', text: `${author} replied to ${since} without pushing.`, action: 'review_again' }
-      if (mission.stale) return { tone: 'amber', icon: 'push', text: `${author} pushed ${head} after ${since}. ${followUpHeldBecause(mission, settings)}`, action: 'review_delta' }
+      if (replied) return { tone: 'teal', icon: 'reply', text: `${author} replied to ${since} without pushing.${whole}`, action: 'review_again' }
+      if (mission.stale) return { tone: 'amber', icon: 'push', text: `${author} pushed ${head} after ${since}. ${followUpHeldBecause(mission, settings)}${whole}`, action: 'review_delta' }
       const when = posted?.postedAt ? ` Round ${posted.index} was posted ${relativeTime(posted.postedAt, now)}.` : ''
-      return { tone: 'teal', icon: 'watch', text: `Watching for ${author}'s reply.${when}`, action: 'review_again' }
+      return { tone: 'teal', icon: 'watch', text: `Watching for ${author}'s reply.${when}${whole}`, action: 'review_again' }
     }
     case 'closed': {
       const note = mission.timeline[mission.timeline.length - 1]?.note

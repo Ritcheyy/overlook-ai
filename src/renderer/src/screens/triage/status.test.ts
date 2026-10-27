@@ -24,10 +24,20 @@ describe('statusFor', () => {
   it('tells a reply without a push from one with a push', () => {
     const replied = makeMission({ state: 'watching', rounds: [posted], authorReplies: [reply] })
     expect(statusFor(replied, settings)).toMatchObject({ icon: 'reply', action: 'review_again' })
-    expect(statusFor(replied, settings).text).toBe(`${replied.pr.author} replied to round 1 without pushing.`)
-    const both = { ...replied, stale: true }
+    // Nothing was pushed, so there is no delta: the next round reads it all.
+    expect(statusFor(replied, settings).text).toBe(`${replied.pr.author} replied to round 1 without pushing. The next round reads the whole PR.`)
+    const both = { ...replied, stale: true, pr: { ...replied.pr, headSha: 'b'.repeat(40) } }
     expect(statusFor(both, settings).text).toContain('replied and pushed')
+    expect(statusFor(both, settings).text).not.toContain('reads the whole PR')
     expect(statusFor(both, settings).action).toBe('review_delta')
+  })
+
+  it('says when the next round reads the whole PR after a clean follow-up', () => {
+    const cleanFollowUp = makeRound({ id: 'r2', index: 2, previousHeadSha: 'c'.repeat(40), postedAt: '2026-09-13T13:00:00Z', findings: [makeFinding({ severity: 'nit' })] })
+    const m = makeMission({ state: 'watching', stale: true, rounds: [posted, cleanFollowUp], pr: { ...makeMission().pr, headSha: 'd'.repeat(40) } })
+    expect(statusFor(m, settings).text).toContain('The next round reads the whole PR.')
+    const busyFollowUp = { ...cleanFollowUp, findings: [makeFinding({ severity: 'major' }), makeFinding({ severity: 'minor' })] }
+    expect(statusFor({ ...m, rounds: [posted, busyFollowUp] }, settings).text).not.toContain('reads the whole PR')
   })
 
   it('counts the findings waiting for decisions and puts a posting error first', () => {

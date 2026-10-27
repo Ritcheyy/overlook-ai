@@ -87,16 +87,34 @@ const APPROACH_SCHEMA = {
  * judge it and absent otherwise, so a follow-up or Security pass cannot fill
  * it in without having searched the repository.
  */
-export type ReviewJsonSchema = Omit<typeof REVIEW_JSON_SCHEMA, 'properties'> & {
-  properties: typeof REVIEW_JSON_SCHEMA.properties & { approach?: typeof APPROACH_SCHEMA }
+const MISSED_EARLIER_SCHEMA = { type: 'boolean', description: 'True when the problem was already present in code an earlier round reviewed.' }
+
+export interface ReviewJsonSchema {
+  type: string
+  additionalProperties: boolean
+  required: string[]
+  properties: {
+    summary: typeof REVIEW_JSON_SCHEMA.properties.summary
+    briefing: typeof REVIEW_JSON_SCHEMA.properties.briefing
+    verdict: typeof REVIEW_JSON_SCHEMA.properties.verdict
+    findings: { type: string; description: string; items: { type: string; additionalProperties: boolean; required: string[]; properties: Record<string, unknown> } }
+    approach?: typeof APPROACH_SCHEMA
+  }
 }
 
-export function reviewJsonSchema(opts: { approach: boolean }): ReviewJsonSchema {
-  if (!opts.approach) return REVIEW_JSON_SCHEMA
+export function reviewJsonSchema(opts: { approach: boolean; missedEarlier?: boolean }): ReviewJsonSchema {
+  if (!opts.approach && !opts.missedEarlier) return REVIEW_JSON_SCHEMA
+  const { findings } = REVIEW_JSON_SCHEMA.properties
   return {
     ...REVIEW_JSON_SCHEMA,
-    required: [...REVIEW_JSON_SCHEMA.required, 'approach'],
-    properties: { ...REVIEW_JSON_SCHEMA.properties, approach: APPROACH_SCHEMA }
+    required: opts.approach ? [...REVIEW_JSON_SCHEMA.required, 'approach'] : [...REVIEW_JSON_SCHEMA.required],
+    properties: {
+      ...REVIEW_JSON_SCHEMA.properties,
+      ...(opts.approach && { approach: APPROACH_SCHEMA }),
+      findings: opts.missedEarlier
+        ? { ...findings, items: { ...findings.items, properties: { ...findings.items.properties, missed_earlier: MISSED_EARLIER_SCHEMA } } }
+        : findings
+    }
   }
 }
 
@@ -248,6 +266,8 @@ export function normaliseFinding(value: unknown): RawFinding | undefined {
   if (suggestion) finding.suggestion = suggestion
   const relatedPr = coerceRelatedPr(value['related_pr'] ?? value['relatedPr'])
   if (relatedPr) finding.relatedPr = relatedPr
+  const missedEarlier = value['missed_earlier'] ?? value['missedEarlier']
+  if (typeof missedEarlier === 'boolean') finding.missedEarlier = missedEarlier
   return finding
 }
 

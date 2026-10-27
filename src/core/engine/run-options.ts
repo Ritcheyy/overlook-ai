@@ -20,6 +20,7 @@ export function sanitizeRunOptions(raw: RunOptions | undefined): RunOptions | un
   if (typeof raw.effort === 'string' && EFFORTS.has(raw.effort)) out.effort = raw.effort
   if (typeof raw.maxBudgetUsd === 'number' && Number.isFinite(raw.maxBudgetUsd) && raw.maxBudgetUsd >= 0) out.maxBudgetUsd = raw.maxBudgetUsd
   if (typeof raw.autoPost === 'boolean') out.autoPost = raw.autoPost
+  if (raw.scope === 'delta' || raw.scope === 'whole') out.scope = raw.scope
   return Object.keys(out).length > 0 ? out : undefined
 }
 
