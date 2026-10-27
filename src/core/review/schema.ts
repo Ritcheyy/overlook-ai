@@ -1,6 +1,6 @@
 /**
- * The shape the reviewer must produce. `REVIEW_JSON_SCHEMA` is handed to
- * `claude --json-schema` so the CLI enforces it; the zod schema re-validates
+ * The shape the reviewer must produce. `reviewJsonSchema` builds what is
+ * handed to `claude --json-schema` so the CLI enforces it; the zod schema re-validates
  * whatever comes back and coerces the sloppy variants a model still emits
  * (mixed-case enums, "./" paths, string line numbers). Structured outputs
  * reject range keywords (minimum, maxLength, pattern...), so limits live in
