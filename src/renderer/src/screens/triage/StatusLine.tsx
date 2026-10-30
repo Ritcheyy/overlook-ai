@@ -53,7 +53,7 @@ export function StatusLine({ pr, mission, settings, slots, now }: StatusLineProp
       if (mission)
         action = (
           <ReviewSplitButton
-            label={status.action === 'review_delta' ? (status.scope === 'whole' ? 'Review the whole PR' : 'Review the delta') : 'Review again'}
+            label={status.action === 'review_delta' ? 'Review the delta' : 'Review again'}
             variant={status.action === 'review_delta' ? 'primary' : 'secondary'}
             icon={<RotateCcw className="h-3.5 w-3.5" aria-hidden />}
             loadoutId={mission.loadoutId}

@@ -35,7 +35,7 @@ import { approachChecked } from '../review/prompt'
 import { expandHome, parsePrId, worktreePathFor } from './paths'
 import { OPEN, RETRY } from '../notifications'
 import { applyRunOptions, runBudgetUsd, runEffort, runModel, sanitizeRunOptions, trimReplies } from './run-options'
-import { isCleanRound, nextScope, wholePassDone, worseVerdict } from './scope'
+import { MAX_AUTO_FULL_PASSES, fullPassHold, isCleanRound, nextScope, worseVerdict } from './scope'
 import { buildWorkspaceContext, describeWorkspaceContext, workspaceFor } from './workspaces'
 
 export interface EngineState {
@@ -335,7 +335,7 @@ export class Scheduler {
 
       const previousRound = lastPostedRound(mission)
       const replies = previousRound ? repliesFor(mission, previousRound) : undefined
-      const scope = previousRound ? nextScope(mission, prepared.headSha, settings, runOptions?.scope) : undefined
+      const scope = previousRound ? nextScope(mission, prepared.headSha, runOptions?.scope) : undefined
       round = {
         id: nanoid(),
         index: mission.rounds.length + 1,
@@ -414,9 +414,13 @@ export class Scheduler {
       round.costUsd = result.costUsd
       if (result.model) round.model = result.model
       let durationMs = result.durationMs ?? Math.max(0, Date.parse(this.now()) - Date.parse(round.startedAt))
-      // A clean delta is not an approval of the whole change: read it all before anything posts.
-      if (scope === 'delta' && previousRound && settings.fullPassBeforeApproval && isCleanRound(round) && !wholePassDone(mission, round.headSha)) {
-        durationMs += await this.fullPass(mission, round, { runner, github, loadout, previousRound, worktreePath: prepared.worktreePath, workspace, settings, signal, decision })
+      // A clean delta is not an approval of the whole change: read it all before anything
+      // posts, unless the PR was already clean or has had its automatic full passes.
+      if (scope === 'delta' && previousRound && isCleanRound(round)) {
+        const hold = fullPassHold(mission, round.headSha, settings)
+        if (!hold) durationMs += await this.fullPass(mission, round, { runner, github, loadout, previousRound, worktreePath: prepared.worktreePath, workspace, settings, signal, decision })
+        else if (hold === 'previous_clean') this.annotate(mission, 'clean delta after a clean round; no full pass')
+        else if (hold === 'used_up') this.annotate(mission, `clean delta; the ${MAX_AUTO_FULL_PASSES} automatic full passes are used`)
       }
       round.finishedAt = this.now()
       round.durationMs = durationMs

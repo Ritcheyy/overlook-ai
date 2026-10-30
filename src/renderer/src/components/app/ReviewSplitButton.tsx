@@ -49,7 +49,7 @@ export interface ReviewSplitButtonProps {
   /** `fromForm` is true when the options form started it, false for the quick click. */
   onStart: (start: ReviewStart, fromForm: boolean) => Promise<void> | void
   variant?: 'primary' | 'secondary'
-  /** Offer the scope choice; only follow-up rounds have one. */
+  /** Offer "Read the whole PR"; only a follow-up has a delta to read instead. */
   scopeChoice?: boolean
   disabled?: boolean
   title?: string
@@ -57,11 +57,7 @@ export interface ReviewSplitButtonProps {
   className?: string
 }
 
-const SCOPES: SelectOption[] = [
-  { value: DEFAULT, label: 'As usual' },
-  { value: 'delta', label: 'Changes since the last round' },
-  { value: 'whole', label: 'The whole PR' }
-]
+
 
 /**
  * A review button whose chevron opens the options for this one run: review
@@ -135,7 +131,7 @@ function RunOptionsForm({ settings, loadoutId: initialLoadout, autoPost: initial
   const [customModel, setCustomModel] = useState('')
   const [effort, setEffort] = useState(DEFAULT)
   const [budget, setBudget] = useState('')
-  const [scope, setScope] = useState(DEFAULT)
+  const [whole, setWhole] = useState(false)
   const [autoPost, setAutoPost] = useState(initialAutoPost)
 
   const loadouts: SelectOption[] = settings.loadouts.map((l) => ({ value: l.id, label: l.name }))
@@ -156,7 +152,7 @@ function RunOptionsForm({ settings, loadoutId: initialLoadout, autoPost: initial
     const n = Number(budget)
     if (budget.trim() !== '' && Number.isFinite(n) && n >= 0) options.maxBudgetUsd = n
     if (autoPost !== initialAutoPost) options.autoPost = autoPost
-    if (scopeChoice && (scope === 'delta' || scope === 'whole')) options.scope = scope
+    if (scopeChoice && whole) options.scope = 'whole'
     onSubmit({ loadoutId, options: Object.keys(options).length > 0 ? options : undefined })
   }
 
@@ -208,9 +204,9 @@ function RunOptionsForm({ settings, loadoutId: initialLoadout, autoPost: initial
         </>
       )}
       {scopeChoice && (
-        <label className={row}>
-          <span className="text-[12px] text-muted">Scope</span>
-          <Select size="sm" aria-label="Scope" value={scope} onChange={(e) => setScope(e.target.value)} options={SCOPES} />
+        <label className="flex cursor-pointer items-center gap-2 px-2 py-1.5 text-[12px] text-muted" title="Read the whole PR instead of the commits since the last round; earlier findings count as already raised">
+          <input type="checkbox" className="h-3.5 w-3.5 accent-accent" checked={whole} onChange={(e) => setWhole(e.target.checked)} />
+          <span>Read the whole PR</span>
         </label>
       )}
       <label className="flex cursor-pointer items-center gap-2 px-2 py-1.5 text-[12px] text-muted">

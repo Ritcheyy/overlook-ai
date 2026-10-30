@@ -16,23 +16,24 @@ const snapshot: AppSnapshot = { inbox: [], ignoredPrs: {}, missions: [], slots: 
 beforeEach(() => useAppStore.setState({ snapshot, loading: false }))
 afterEach(cleanup)
 
-async function submitWith(scopeChoice: boolean, pick?: string): Promise<ReviewStart> {
+async function submitWith(scopeChoice: boolean, whole?: boolean): Promise<ReviewStart> {
   const starts: ReviewStart[] = []
   render(<ReviewSplitButton label="Re-run" loadoutId="blind" autoPost={false} scopeChoice={scopeChoice} onStart={(s) => void starts.push(s)} />)
   fireEvent.click(screen.getByRole('button', { name: 'Review options' }))
-  const scope = screen.queryByLabelText('Scope')
-  if (pick) fireEvent.change(scope!, { target: { value: pick } })
-  else expect(scope).toBeNull()
+  const box = screen.queryByLabelText('Read the whole PR')
+  if (scopeChoice) expect((box as HTMLInputElement).checked).toBe(false)
+  else expect(box).toBeNull()
+  if (whole) fireEvent.click(box!)
   fireEvent.click(screen.getByRole('button', { name: 'Start review' }))
   await waitFor(() => expect(starts).toHaveLength(1))
   return starts[0]
 }
 
 describe('ReviewSplitButton scope', () => {
-  it('offers the scope only for follow-ups and passes the choice as a run option', async () => {
-    expect((await submitWith(true, 'whole')).options).toEqual({ scope: 'whole' })
+  it('offers Read the whole PR only for follow-ups, unticked, and passes it as a run option', async () => {
+    expect((await submitWith(true, true)).options).toEqual({ scope: 'whole' })
     cleanup()
-    expect((await submitWith(true, 'delta')).options).toEqual({ scope: 'delta' })
+    expect((await submitWith(true)).options).toBeUndefined()
     cleanup()
     expect((await submitWith(false)).options).toBeUndefined()
   })

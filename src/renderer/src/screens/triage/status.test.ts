@@ -32,18 +32,23 @@ describe('statusFor', () => {
     expect(statusFor(both, settings)).toMatchObject({ action: 'review_delta', scope: 'delta' })
   })
 
-  it('says when the next round reads the whole PR after a clean follow-up, unless full passes are off', () => {
-    const cleanFollowUp = makeRound({ id: 'r2', index: 2, previousHeadSha: 'c'.repeat(40), postedAt: '2026-09-13T13:00:00Z', findings: [makeFinding({ severity: 'nit' })] })
-    const m = makeMission({ state: 'watching', stale: true, rounds: [posted, cleanFollowUp], pr: { ...makeMission().pr, headSha: 'd'.repeat(40) } })
-    expect(statusFor(m, settings)).toMatchObject({ action: 'review_delta', scope: 'whole' })
-    expect(statusFor(m, settings).text).toContain('The next round reads the whole PR.')
-    const busyFollowUp = { ...cleanFollowUp, findings: [makeFinding({ severity: 'major' }), makeFinding({ severity: 'minor' })] }
-    expect(statusFor({ ...m, rounds: [posted, busyFollowUp] }, settings)).toMatchObject({ scope: 'delta' })
-    expect(statusFor({ ...m, rounds: [posted, busyFollowUp] }, settings).text).not.toContain('reads the whole PR')
-    expect(statusFor(m, { ...settings, fullPassBeforeApproval: false }).text).not.toContain('reads the whole PR')
+  it('says when a clean delta gets a full pass, and when the automatic ones are used up', () => {
+    const busy = { ...posted, findings: [makeFinding({ severity: 'major', decision: 'approved' }), makeFinding({ severity: 'minor', decision: 'approved' })] }
+    const m = makeMission({ state: 'watching', stale: true, rounds: [busy], pr: { ...makeMission().pr, headSha: 'd'.repeat(40) } })
+    expect(statusFor(m, settings)).toMatchObject({ action: 'review_delta', scope: 'delta', fullPass: 'follows' })
+    expect(statusFor(m, settings).text).toContain('If the delta is clean, a full pass follows.')
+    // After a clean round the next delta stays a delta, and the setting off says nothing either.
+    const clean = { ...posted, findings: [makeFinding({ severity: 'nit', decision: 'approved' })] }
+    expect(statusFor({ ...m, rounds: [clean] }, settings)).toMatchObject({ scope: 'delta', fullPass: undefined })
+    expect(statusFor({ ...m, rounds: [clean] }, settings).text).not.toContain('full pass')
+    expect(statusFor(m, { ...settings, fullPassBeforeApproval: false }).text).not.toContain('full pass')
+    // The cap is said, so the user knows to tick Read the whole PR.
+    const spent = [1, 2].map((i) => makeRound({ id: `r${i + 1}`, index: i + 1, headSha: `${i}`.repeat(40), previousHeadSha: 'c'.repeat(40), scope: 'delta+whole' as const, postedAt: `2026-09-1${i + 3}T13:00:00Z`, findings: busy.findings }))
+    expect(statusFor({ ...m, rounds: [busy, ...spent] }, settings)).toMatchObject({ fullPass: 'used_up' })
+    expect(statusFor({ ...m, rounds: [busy, ...spent] }, settings).text).toContain('Automatic full passes are used up; tick Read the whole PR for another.')
     // Quietly watching says nothing about scope; only a re-run offered after a push does.
-    const idle = makeMission({ state: 'watching', rounds: [posted, cleanFollowUp], pr: { ...makeMission().pr, headSha: cleanFollowUp.headSha } })
-    expect(statusFor(idle, settings).text).not.toContain('whole PR')
+    const idle = makeMission({ state: 'watching', rounds: [busy], pr: { ...makeMission().pr, headSha: busy.headSha } })
+    expect(statusFor(idle, settings).text).not.toContain('full pass')
   })
 
   it('counts the findings waiting for decisions and puts a posting error first', () => {

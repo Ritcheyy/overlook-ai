@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { HEAD_SHA, PREV_SHA, makeFinding, makeMission, makeRound } from '../review/test-helpers'
-import { isCleanRound, nextScope, wholePassDone, worseVerdict } from './scope'
+import { autoFullPassesUsed, fullPassHold, isCleanRound, nextScope, wholePassDone, worseVerdict } from './scope'
 
-const posted = (overrides = {}) => makeRound({ id: 'r1', index: 1, headSha: PREV_SHA, postedAt: '2026-09-13T12:00:00Z', ...overrides })
+const posted = (overrides = {}) => makeRound({ id: 'r1', index: 1, headSha: PREV_SHA, postedAt: '2026-09-13T12:00:00Z', findings: [makeFinding({ severity: 'major' }), makeFinding({ severity: 'minor' })], ...overrides })
 const followUp = (overrides = {}) => makeRound({ id: 'r2', index: 2, headSha: HEAD_SHA, previousHeadSha: PREV_SHA, postedAt: '2026-09-13T13:00:00Z', ...overrides })
 const NEW_HEAD = 'e'.repeat(40)
 const on = { fullPassBeforeApproval: true }
@@ -19,34 +19,60 @@ describe('isCleanRound', () => {
 describe('nextScope', () => {
   it('reads the delta by default and the whole PR when asked', () => {
     const m = makeMission({ rounds: [posted()] })
-    expect(nextScope(m, NEW_HEAD, on)).toBe('delta')
-    expect(nextScope(m, NEW_HEAD, on, 'whole')).toBe('whole')
-    expect(nextScope(makeMission({ rounds: [followUp({ findings: [makeFinding({ severity: 'nit' })] })] }), NEW_HEAD, on, 'delta')).toBe('delta')
+    expect(nextScope(m, NEW_HEAD)).toBe('delta')
+    expect(nextScope(m, NEW_HEAD, 'whole')).toBe('whole')
+    expect(nextScope(makeMission({ rounds: [posted(), followUp({ findings: [] })] }), NEW_HEAD)).toBe('delta')
   })
 
-  it('reads the whole PR when nothing was pushed since the posted round, full passes on or off', () => {
-    expect(nextScope(makeMission({ rounds: [posted()] }), PREV_SHA, on)).toBe('whole')
-    expect(nextScope(makeMission({ rounds: [posted()] }), PREV_SHA, off)).toBe('whole')
-  })
-
-  it('reads the whole PR after a clean follow-up, not after a clean first round or a busy follow-up', () => {
-    expect(nextScope(makeMission({ rounds: [posted(), followUp({ findings: [makeFinding({ severity: 'minor' })] })] }), NEW_HEAD, on)).toBe('whole')
-    expect(nextScope(makeMission({ rounds: [posted({ findings: [] })] }), NEW_HEAD, on)).toBe('delta')
-    expect(nextScope(makeMission({ rounds: [posted(), followUp({ findings: [makeFinding({ severity: 'major' }), makeFinding({ severity: 'major' })] })] }), NEW_HEAD, on)).toBe('delta')
-  })
-
-  it('judges clean on the posted findings, which is what the author had to fix', () => {
-    const twoMajorsOneDropped = followUp({ findings: [makeFinding({ severity: 'major' }), makeFinding({ severity: 'major', decision: 'dropped', dropReason: 'false_positive' })] })
-    expect(nextScope(makeMission({ rounds: [posted(), twoMajorsOneDropped] }), NEW_HEAD, on)).toBe('whole')
-  })
-
-  it('keeps to the delta after a clean follow-up when full passes are off', () => {
-    expect(nextScope(makeMission({ rounds: [posted(), followUp({ findings: [] })] }), NEW_HEAD, off)).toBe('delta')
+  it('reads the whole PR when nothing was pushed since the posted round', () => {
+    expect(nextScope(makeMission({ rounds: [posted()] }), PREV_SHA)).toBe('whole')
+    expect(nextScope(makeMission({ rounds: [posted()] }), PREV_SHA, 'delta')).toBe('delta')
   })
 
   it('ignores rounds that were never posted', () => {
-    expect(nextScope(makeMission({ rounds: [posted(), followUp({ postedAt: undefined, findings: [] })] }), NEW_HEAD, on)).toBe('delta')
-    expect(nextScope(makeMission({ rounds: [] }), NEW_HEAD, on)).toBe('delta')
+    expect(nextScope(makeMission({ rounds: [posted(), followUp({ postedAt: undefined })] }), HEAD_SHA)).toBe('delta')
+    expect(nextScope(makeMission({ rounds: [] }), NEW_HEAD)).toBe('delta')
+  })
+})
+
+describe('fullPassHold', () => {
+  it('lets a clean delta run a full pass after a round with real findings', () => {
+    expect(fullPassHold(makeMission({ rounds: [posted()] }), HEAD_SHA, on)).toBeUndefined()
+    expect(fullPassHold(makeMission({ rounds: [posted()] }), HEAD_SHA, off)).toBe('off')
+  })
+
+  it('holds it when the round before was clean, judged on the posted findings', () => {
+    expect(fullPassHold(makeMission({ rounds: [posted({ findings: [makeFinding({ severity: 'minor' }), makeFinding({ severity: 'nit' })] })] }), HEAD_SHA, on)).toBe('previous_clean')
+    expect(fullPassHold(makeMission({ rounds: [posted(), followUp({ findings: [] })] }), NEW_HEAD, on)).toBe('previous_clean')
+    const twoMajorsOneDropped = followUp({ findings: [makeFinding({ severity: 'major' }), makeFinding({ severity: 'major', decision: 'dropped', dropReason: 'false_positive' })] })
+    expect(fullPassHold(makeMission({ rounds: [posted(), twoMajorsOneDropped] }), NEW_HEAD, on)).toBe('previous_clean')
+    // A round that had real findings arms it again.
+    expect(fullPassHold(makeMission({ rounds: [posted({ findings: [] }), followUp({ findings: [makeFinding({ severity: 'major' }), makeFinding({ severity: 'major' })] })] }), NEW_HEAD, on)).toBeUndefined()
+  })
+
+  it('holds it once a full pass ran at that head', () => {
+    expect(fullPassHold(makeMission({ rounds: [posted(), followUp({ scope: 'delta+whole', postedAt: undefined })] }), HEAD_SHA, on)).toBe('done_at_head')
+  })
+
+  it('holds it after two automatic full passes on the PR, failed ones included', () => {
+    const first = followUp({ id: 'r2', index: 2, headSha: 'b'.repeat(40), scope: 'delta+whole', findings: [makeFinding({ severity: 'major' }), makeFinding({ severity: 'major', missedEarlier: true })] })
+    const second = followUp({ id: 'r3', index: 3, headSha: 'c'.repeat(40), previousHeadSha: 'b'.repeat(40), scope: 'delta', fullPassError: 'budget', findings: [makeFinding({ severity: 'major' }), makeFinding({ severity: 'major' })] })
+    expect(fullPassHold(makeMission({ rounds: [posted(), first] }), NEW_HEAD, on)).toBeUndefined()
+    expect(fullPassHold(makeMission({ rounds: [posted(), first, second] }), NEW_HEAD, on)).toBe('used_up')
+    // A manual whole-PR round does not count against the cap.
+    const manual = followUp({ id: 'r3', index: 3, headSha: 'c'.repeat(40), scope: 'whole', findings: [makeFinding({ severity: 'major' }), makeFinding({ severity: 'major' })] })
+    expect(fullPassHold(makeMission({ rounds: [posted(), first, manual] }), NEW_HEAD, on)).toBeUndefined()
+  })
+
+  it('ignores rounds that were never posted when judging the round before', () => {
+    expect(fullPassHold(makeMission({ rounds: [posted(), followUp({ postedAt: undefined, findings: [] })] }), NEW_HEAD, on)).toBeUndefined()
+  })
+})
+
+describe('autoFullPassesUsed', () => {
+  it('counts chained full passes and failed attempts, not manual whole-PR rounds', () => {
+    expect(autoFullPassesUsed(makeMission({ rounds: [posted(), followUp({ scope: 'delta+whole' }), followUp({ id: 'r3', scope: 'whole' }), followUp({ id: 'r4', scope: 'delta', fullPassError: 'timeout' })] }))).toBe(2)
+    expect(autoFullPassesUsed(makeMission({ rounds: [] }))).toBe(0)
   })
 })
 
