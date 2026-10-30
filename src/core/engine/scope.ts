@@ -36,7 +36,8 @@ export type FullPassHold = 'off' | 'previous_clean' | 'done_at_head' | 'used_up'
 export function fullPassHold(mission: Mission, headSha: string, settings: Pick<Settings, 'fullPassBeforeApproval'>): FullPassHold | undefined {
   if (!settings.fullPassBeforeApproval) return 'off'
   const posted = lastPostedRound(mission)
-  if (posted && isCleanRound({ findings: posted.findings.filter((f) => f.decision === 'approved') })) return 'previous_clean'
+  // A round whose full pass failed never established that the PR was clean, whatever its delta found.
+  if (posted && posted.fullPassError === undefined && isCleanRound({ findings: posted.findings.filter((f) => f.decision === 'approved') })) return 'previous_clean'
   if (wholePassDone(mission, headSha)) return 'done_at_head'
   if (autoFullPassesUsed(mission) >= MAX_AUTO_FULL_PASSES) return 'used_up'
   return undefined

@@ -127,7 +127,7 @@ function GeneralSection({ settings, save, initialDemoMode }: { settings: Setting
       </Field>
       <Field
         label="Full pass before approving"
-        hint="When a follow-up finds at most one thing above a nit and the round before it found more, the whole PR is read again in the same round before anything posts, at most twice per PR. Such a round can spend up to twice the budget per review. Off, only a re-run with nothing pushed, or Read the whole PR in the Review options, reads the whole PR."
+        hint="When a follow-up finds at most one thing above a nit and the round before it posted two or more, the whole PR is read again in the same round before anything posts, at most twice per PR. Such a round can spend up to twice the budget per review. Off, only a re-run with nothing pushed, or Read the whole PR in the Review options, reads the whole PR."
       >
         <Toggle aria-label="Full pass before approving" checked={settings.fullPassBeforeApproval} onChange={(fullPassBeforeApproval) => void save({ fullPassBeforeApproval })} />
       </Field>

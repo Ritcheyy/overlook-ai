@@ -751,6 +751,22 @@ describe('engine', () => {
     expect(h.runner.calls.at(-1)).toMatchObject({ scope: 'whole' })
   })
 
+  it('reads the whole PR on the next clean delta when the posted round had a failed full pass', async () => {
+    const h = await makeEngine()
+    h.runner.failWholePass = new Error('timeout')
+    const a = await h.api.dispatch({ prId: PR_412 })
+    await waitForState(h, a.id, 'needs_you')
+    await approveAndPost(h, a.id)
+    const failed = await pushAndRerun(h, PR_412, a.id)
+    expect(failed.rounds[1].fullPassError).toBe('timeout')
+    // The user posts the capped round instead of retrying; the PR was never read in full after round 1's findings.
+    await approveAndPost(h, a.id)
+    h.runner.failWholePass = undefined
+    const next = await pushAndRerun(h, PR_412, a.id)
+    expect(h.runner.calls.map((c) => c.scope)).toEqual([undefined, 'delta', 'whole', 'delta', 'whole'])
+    expect(next.rounds[2].scope).toBe('delta+whole')
+  })
+
   it('runs the full pass at most once per head', async () => {
     const h = await makeEngine()
     const a = await h.api.dispatch({ prId: PR_412 })

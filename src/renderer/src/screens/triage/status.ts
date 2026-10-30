@@ -39,7 +39,7 @@ export function statusFor(mission: Mission | undefined, settings: Settings, slot
   // Said only after a push, where a delta is on offer; a round with nothing pushed always reads it all.
   const hold = scope === 'delta' && posted ? fullPassHold(mission, mission.pr.headSha, settings) : 'off'
   const fullPass = hold === undefined ? 'follows' : hold === 'used_up' ? 'used_up' : undefined
-  const whole = fullPass === 'follows' ? ' If the delta is clean, a full pass follows.' : fullPass === 'used_up' ? ' Automatic full passes are used up; tick Read the whole PR for another.' : ''
+  const whole = fullPass === 'follows' ? ' If the delta is clean, a full pass follows.' : fullPass === 'used_up' ? ' Automatic full passes are used up; tick "Read the whole PR" in the review options for another.' : ''
   switch (mission.state) {
     case 'queued':
       return { tone: 'muted', icon: 'queue', text: 'Queued. It starts when a reviewer is free.', action: 'cancel' }

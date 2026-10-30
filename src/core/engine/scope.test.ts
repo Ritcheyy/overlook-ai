@@ -50,6 +50,11 @@ describe('fullPassHold', () => {
     expect(fullPassHold(makeMission({ rounds: [posted({ findings: [] }), followUp({ findings: [makeFinding({ severity: 'major' }), makeFinding({ severity: 'major' })] })] }), NEW_HEAD, on)).toBeUndefined()
   })
 
+  it('never treats a round whose full pass failed as clean', () => {
+    const failed = followUp({ findings: [makeFinding({ severity: 'nit', decision: 'approved' })], fullPassError: 'budget' })
+    expect(fullPassHold(makeMission({ rounds: [posted(), failed] }), NEW_HEAD, on)).toBeUndefined()
+  })
+
   it('holds it once a full pass ran at that head', () => {
     expect(fullPassHold(makeMission({ rounds: [posted(), followUp({ scope: 'delta+whole', postedAt: undefined })] }), HEAD_SHA, on)).toBe('done_at_head')
   })

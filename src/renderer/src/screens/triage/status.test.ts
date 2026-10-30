@@ -45,7 +45,7 @@ describe('statusFor', () => {
     // The cap is said, so the user knows to tick Read the whole PR.
     const spent = [1, 2].map((i) => makeRound({ id: `r${i + 1}`, index: i + 1, headSha: `${i}`.repeat(40), previousHeadSha: 'c'.repeat(40), scope: 'delta+whole' as const, postedAt: `2026-09-1${i + 3}T13:00:00Z`, findings: busy.findings }))
     expect(statusFor({ ...m, rounds: [busy, ...spent] }, settings)).toMatchObject({ fullPass: 'used_up' })
-    expect(statusFor({ ...m, rounds: [busy, ...spent] }, settings).text).toContain('Automatic full passes are used up; tick Read the whole PR for another.')
+    expect(statusFor({ ...m, rounds: [busy, ...spent] }, settings).text).toContain('Automatic full passes are used up; tick "Read the whole PR" in the review options for another.')
     // Quietly watching says nothing about scope; only a re-run offered after a push does.
     const idle = makeMission({ state: 'watching', rounds: [busy], pr: { ...makeMission().pr, headSha: busy.headSha } })
     expect(statusFor(idle, settings).text).not.toContain('full pass')

@@ -421,6 +421,7 @@ export class Scheduler {
         if (!hold) durationMs += await this.fullPass(mission, round, { runner, github, loadout, previousRound, worktreePath: prepared.worktreePath, workspace, settings, signal, decision })
         else if (hold === 'previous_clean') this.annotate(mission, 'clean delta after a clean round; no full pass')
         else if (hold === 'used_up') this.annotate(mission, `clean delta; the ${MAX_AUTO_FULL_PASSES} automatic full passes are used`)
+        else if (hold === 'done_at_head') this.annotate(mission, 'clean delta; a full pass already ran at this head')
       }
       round.finishedAt = this.now()
       round.durationMs = durationMs
