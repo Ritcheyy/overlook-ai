@@ -92,7 +92,8 @@ export function parsePrDetail(json: string): GhPrDetail {
 const graphqlBodySchema = z
   .object({
     data: z.record(z.string(), z.object({ pullRequest: z.record(z.string(), z.unknown()).nullish() }).passthrough().nullish()).nullish(),
-    errors: z.array(z.object({ message: z.string().optional() }).passthrough()).optional()
+    errors: z.array(z.object({ message: z.string().optional() }).passthrough()).optional(),
+    message: z.string().optional()
   })
   .passthrough()
 
@@ -116,7 +117,7 @@ function flattenGraphqlPr(node: Record<string, unknown>): Record<string, unknown
 export function parseGraphqlDetails(json: string, aliases: readonly { alias: string; fullName: string }[]): Map<string, GhPrDetail> {
   const body = graphqlBodySchema.parse(parseJson(json.trim(), 'gh api graphql'))
   if (!body.data) {
-    const why = body.errors?.map((e) => e.message).filter(Boolean).join('; ')
+    const why = body.errors?.map((e) => e.message).filter(Boolean).join('; ') || body.message
     throw new Error(`gh api graphql returned no data${why ? `: ${why}` : ''}`)
   }
   const out = new Map<string, GhPrDetail>()

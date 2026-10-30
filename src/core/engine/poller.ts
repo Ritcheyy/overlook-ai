@@ -148,13 +148,20 @@ export async function pollInbox(sched: Scheduler): Promise<void> {
     const [requested, mine] = await Promise.all([github.listReviewRequested(), state.settings.includeMine ? github.listMine() : []])
     listed = mergeListings(requested, mine)
     applyInboxFilters(listed, state.missions, state.settings, sched.ports.clock.now())
-    fetched = await fetchMissionPrs(github, state.missions, listed)
   } catch (e) {
     state.pollError = errorMessage(e)
     sched.changed()
     return
   }
-  state.pollError = undefined
+  // The listing stands on its own: when the batch read of the PRs under review fails, the
+  // inbox still updates, each review keeps its last snapshot, and the rail says what failed.
+  try {
+    fetched = await fetchMissionPrs(github, state.missions, listed)
+    state.pollError = undefined
+  } catch (e) {
+    fetched = new Map()
+    state.pollError = `Could not read the PRs under review: ${errorMessage(e)}`
+  }
   state.lastPollAt = sched.now()
 
   try {

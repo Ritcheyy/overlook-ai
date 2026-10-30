@@ -32,7 +32,7 @@ function useScreenShortcuts() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return
-      if (e.key === 'r') {
+      if (e.key.toLowerCase() === 'r') {
         e.preventDefault()
         if (!e.repeat) void useAppStore.getState().refreshInbox()
         return

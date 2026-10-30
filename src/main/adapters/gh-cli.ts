@@ -191,8 +191,12 @@ export class GhCliGitHub implements GitHubPort {
     const [me, out] = await Promise.all([this.me(), this.gh(args)])
     const inactive = new Set(inactiveRepos)
     const items = parseSearchResults(out).filter((item) => !inactive.has(item.repository.nameWithOwner))
-    // The search index's stamp decides staleness: the detail's own may lag it by seconds.
-    const changed = items.filter((item) => this.details.get(searchItemId(item))?.updatedAt !== item.updatedAt)
+    // Fresh when the index's stamp matches, or the cached detail is at least as new as the index,
+    // which lags a live review's own reads by minutes.
+    const changed = items.filter((item) => {
+      const cached = this.details.get(searchItemId(item))
+      return !cached || (cached.updatedAt !== item.updatedAt && cached.detail.updatedAt < item.updatedAt)
+    })
     const fetched = await this.fetchDetails(changed.map((item) => ({ fullName: item.repository.nameWithOwner, number: item.number })))
     for (const item of changed) {
       const detail = fetched.get(searchItemId(item))
@@ -247,8 +251,9 @@ export class GhCliGitHub implements GitHubPort {
       }
       throw e
     }
-    // A GraphQL batch with one unreadable PR exits 1 but still prints the rest; the parser keeps what resolved.
-    if (res.code !== 0 && !(opts.partial && res.stdout.trim().startsWith('{'))) throw ghError(args, res)
+    // A GraphQL batch with one unreadable PR exits 1 but still prints the rest; the parser keeps what
+    // resolved. An auth or rate-limit body has no data, and its reason is on stderr.
+    if (res.code !== 0 && !(opts.partial && res.stdout.includes('"data"'))) throw ghError(args, res)
     return res.stdout
   }
 }

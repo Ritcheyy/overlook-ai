@@ -136,7 +136,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (get().refreshing) return
     set({ refreshing: true })
     try {
-      await api.refreshInbox()
+      const snapshot = await api.refreshInbox()
+      // The engine keeps a failed poll in the snapshot rather than rejecting; asked for by hand, it is still a failure.
+      if (snapshot.pollError) get().pushToast({ kind: 'error', title: 'Refresh failed', body: snapshot.pollError })
     } catch (e) {
       get().pushToast({ kind: 'error', title: 'Refresh failed', body: (e as Error).message })
     } finally {

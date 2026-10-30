@@ -97,13 +97,14 @@ function asked(calls: Call[]): AskedRef[] {
 }
 
 /** Answers a batched query from a per-PR node factory; null leaves that alias unresolved, the way gh reports it. */
-function graphql(query: string, nodeFor: (fullName: string, number: number, comments: boolean) => Record<string, unknown> | null): ExecResult {
+function graphql(query: string, nodeFor: (fullName: string, number: number, comments: boolean) => Record<string, unknown> | null | 'no-repo'): ExecResult {
   const data: Record<string, unknown> = {}
   const errors: { message: string }[] = []
   for (const ref of refsIn(query)) {
     const n = nodeFor(ref.fullName, ref.number, ref.comments)
-    data[ref.alias] = { pullRequest: n }
+    data[ref.alias] = n === 'no-repo' ? null : { pullRequest: n }
     if (!n) errors.push({ message: `Could not resolve to a PullRequest with the number of ${ref.number}.` })
+    if (n === 'no-repo') errors.push({ message: `Could not resolve to a Repository with the name '${ref.fullName}'.` })
   }
   return { stdout: JSON.stringify(errors.length ? { data, errors } : { data }), stderr: errors.map((e) => `gh: ${e.message}`).join('\n'), code: errors.length ? 1 : 0 }
 }
@@ -175,10 +176,11 @@ describe('GhCliGitHub', () => {
 
   it('skips detail reads for PRs whose updatedAt is unchanged since the last poll', async () => {
     let stamp412 = 't1'
+    let stamp413 = 't1'
     const { exec, calls } = fakeGh(
       withLogin((args) => {
         if (args[0] === 'search') return ok(JSON.stringify([searchItem('acme/checkout-api', 412, stamp412), searchItem('acme/checkout-api', 413, 't1')]))
-        return graphql(queryOf(args)!, (fullName, number) => node(fullName, number, number === 412 ? stamp412 : 't1', { headRefOid: `${stamp412}`.padEnd(40, '0') }))
+        return graphql(queryOf(args)!, (fullName, number) => node(fullName, number, number === 412 ? stamp412 : stamp413, { headRefOid: `${stamp412}`.padEnd(40, '0') }))
       })
     )
     const gh = new GhCliGitHub({ exec })
@@ -194,6 +196,13 @@ describe('GhCliGitHub', () => {
     expect(asked(calls)[2]!.number).toBe(412)
     expect(prs.find((p) => p.number === 412)!.headSha).toBe('t9'.padEnd(40, '0'))
     expect(prs).toHaveLength(2)
+
+    // A live review read 413 fresh, newer than the search index's stamp: the listing trusts that read.
+    stamp413 = 't5'
+    await gh.getPullRequest('acme/checkout-api', 413, { comments: true })
+    expect(asked(calls)).toHaveLength(4)
+    await gh.listReviewRequested()
+    expect(asked(calls)).toHaveLength(4)
   })
 
   it('applies the search filter: --updated for the age cut-off and no detail read for inactive repos', async () => {
@@ -251,7 +260,7 @@ describe('GhCliGitHub', () => {
   })
 
   it('fetches one PR and computes reviewRequested from reviewRequests', async () => {
-    const { exec } = fakeGh(withLogin((args) => graphql(queryOf(args)!, (fullName, number) => node(fullName, number, 't1', { state: 'MERGED', mergedAt: '2026-09-13T12:00:00Z', reviewRequests: [{ login: 'octo-Reviewer' }] }))))
+    const { exec } = fakeGh(withLogin((args) => graphql(queryOf(args)!, (fullName, number) => node(fullName, number, 't1', { state: 'MERGED', mergedAt: '2026-09-13T12:00:00Z', reviewRequests: [null, { login: 'octo-Reviewer' }] }))))
     const pr = await new GhCliGitHub({ exec }).getPullRequest('acme/checkout-api', 412)
     expect(pr).toMatchObject({ id: 'acme/checkout-api#412', state: 'merged', reviewRequested: true, mine: false })
   })
@@ -286,12 +295,13 @@ describe('GhCliGitHub', () => {
   })
 
   it('reads many PRs in one query, keeps the ones that resolved when one cannot be read, and asks for comments where wanted', async () => {
-    const { exec, calls } = fakeGh(withLogin((args) => graphql(queryOf(args)!, (fullName, number, comments) => (number === 999 ? null : node(fullName, number, 't1', comments ? { comments: [] } : {})))))
+    const { exec, calls } = fakeGh(withLogin((args) => graphql(queryOf(args)!, (fullName, number, comments) => (fullName === 'acme/gone' ? 'no-repo' : number === 999 ? null : node(fullName, number, 't1', comments ? { comments: [] } : {})))))
     const gh = new GhCliGitHub({ exec })
     const got = await gh.getPullRequests([
       { fullName: 'acme/checkout-api', number: 412, comments: true },
       { fullName: 'acme/checkout-api', number: 999 },
       { fullName: 'acme/storefront-web', number: 1203 },
+      { fullName: 'acme/gone', number: 1 },
       { fullName: 'not a repo', number: 1 }
     ])
     expect([...got.keys()]).toEqual(['acme/checkout-api#412', 'acme/storefront-web#1203'])
@@ -301,14 +311,20 @@ describe('GhCliGitHub', () => {
     expect(asked(calls).map((r) => [r.number, r.comments])).toEqual([
       [412, true],
       [999, false],
-      [1203, false]
+      [1203, false],
+      [1, false]
     ])
     await expect(gh.getPullRequest('acme/checkout-api', 999)).rejects.toThrow(/acme\/checkout-api#999 could not be read/)
   })
 
-  it('fails a batch that returns no data, and one that is not JSON', async () => {
-    const { exec } = fakeGh(withLogin(() => ({ stdout: '{"errors":[{"message":"Bad credentials"}]}', stderr: '', code: 1 })))
-    await expect(new GhCliGitHub({ exec }).getPullRequest('acme/checkout-api', 412)).rejects.toThrow(/gh api graphql returned no data: Bad credentials/)
+  it('fails a batch that returns no data, keeping the reason gh gives', async () => {
+    const { exec } = fakeGh(withLogin(() => ({ stdout: '{"data":null,"errors":[{"message":"Something went wrong"}]}', stderr: '', code: 1 })))
+    await expect(new GhCliGitHub({ exec }).getPullRequest('acme/checkout-api', 412)).rejects.toThrow(/gh api graphql returned no data: Something went wrong/)
+    // An auth or rate-limit answer is a plain message body, and gh puts the status on stderr.
+    const { exec: exec401 } = fakeGh(withLogin(() => ({ stdout: '{"message":"Bad credentials","documentation_url":"https://docs.github.com"}', stderr: 'gh: Bad credentials (HTTP 401)', code: 1 })))
+    await expect(new GhCliGitHub({ exec: exec401 }).getPullRequest('acme/checkout-api', 412)).rejects.toThrow(/^gh api graphql failed \(exit 1\): gh: Bad credentials \(HTTP 401\)/)
+    const { exec: execMessage } = fakeGh(withLogin(() => ok('{"message":"API rate limit exceeded"}')))
+    await expect(new GhCliGitHub({ exec: execMessage }).getPullRequest('acme/checkout-api', 412)).rejects.toThrow(/gh api graphql returned no data: API rate limit exceeded/)
     const { exec: exec2 } = fakeGh(withLogin(() => ({ stdout: '', stderr: 'boom', code: 1 })))
     await expect(new GhCliGitHub({ exec: exec2 }).getPullRequest('acme/checkout-api', 412)).rejects.toThrow(/^gh api graphql failed \(exit 1\): boom/)
   })

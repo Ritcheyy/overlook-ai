@@ -641,6 +641,24 @@ describe('engine', () => {
     ]))
   })
 
+  it('keeps the inbox fresh and says so when the batch read of the PRs under review fails', async () => {
+    const h = await makeEngine()
+    const a = await h.api.dispatch({ prId: PR_412 })
+    await waitForState(h, a.id, 'needs_you')
+    await approveAndPost(h, a.id)
+    const original = h.github.getPullRequests.bind(h.github)
+    h.github.getPullRequests = async () => {
+      throw new Error('HTTP 502')
+    }
+    const fresh = h.github.simulateNewPullRequest()
+    const snap = await h.api.refreshInbox()
+    expect(snap.pollError).toBe('Could not read the PRs under review: HTTP 502')
+    expect(snap.inbox.some((p) => p.id === fresh.id)).toBe(true)
+    expect(missionOf(snap, a.id).state).toBe('watching')
+    h.github.getPullRequests = original
+    expect((await h.api.refreshInbox()).pollError).toBeUndefined()
+  })
+
   it('offers Retry on a failed review and Open triage when findings are ready', async () => {
     const h = await makeEngine()
     h.runner.inner.failNext = true
