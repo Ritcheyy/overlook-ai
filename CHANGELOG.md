@@ -10,7 +10,7 @@
 - The round line and tabs sit above both columns of the details screen, so the round's cards and the Review card start level.
 - Reviews can run through the Cursor CLI instead of Claude Code. Settings > Engine picks the CLI and its model; a Cursor run stays read-only through a permissions file written into the worktree, with the PR branch's own `.cursor` folder set aside for the review. Cursor reports no cost, so those rounds show none and the budget does not apply.
 - The Review card beside a PR's details names the model and effort of the round on screen. The model id is saved as soon as Claude Code names it, so a running or failed round shows the id instead of the alias.
-- Refreshing takes seconds instead of minutes: the two searches run side by side and every PR under review is read in batches of twenty through one GraphQL query each, instead of one `gh` call per PR in turn. The refresh button also sits on the Inbox header and on a PR's details header, ⌘R refreshes from any screen, and View > Reload leaves the app menu.
+- Refreshing takes seconds instead of minutes: the two searches run side by side and every PR under review is read in batches of twenty through one GraphQL query each, instead of one `gh` call per PR in turn. The refresh button also sits on the Inbox header and on a PR's details header, ⌘R refreshes from any screen, ⌘F focuses the search box (the Inbox's from a screen without one), and View > Reload leaves the app menu.
 
 ## 0.2.0
 

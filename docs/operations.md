@@ -78,6 +78,10 @@ A delta round only reads the commits pushed since the last posted round, so on i
 
 A full pass costs what a first review costs, and a delta-plus-full round can spend up to twice the per-review budget, since the budget applies to each pass. Settings > General > "Full pass before approving" switches off both the in-round pass and the whole-PR round after a clean follow-up; a re-run with nothing pushed and the Scope choice still read the whole PR. If the full pass fails (budget, timeout), the delta findings stand, the verdict is capped at Comments, and the round offers "Retry the full pass", which starts a whole-PR round at the same head.
 
+## Keyboard
+
+⌘1 to ⌘5 switch screens in rail order, ⌘R refreshes the inbox from any screen, and ⌘F focuses the search box of the Inbox or the Triage list, going to the Inbox from a screen without one.
+
 ## Polling and refresh
 
 The Inbox is polled every poll interval (Settings > General) and on demand: the refresh button sits in the rail, on the Inbox header and on a PR's details header, and ⌘R refreshes from any screen. A poll runs the review-requested and my-PRs searches side by side, then reads every PR with a live review in batches of twenty through one GraphQL query each, with the conversation only for watched ones, so a refresh takes seconds rather than one `gh` call per PR in turn. A PR the batch cannot read (gone, or access lost) keeps its last snapshot until the next poll.

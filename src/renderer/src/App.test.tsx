@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within, waitFor } from '@testing-library/react'
 import type { AppSnapshot, Mission, ReviewRound } from '@core/domain'
 import { SKILL_MESSAGE_EXAMPLE, defaultSettings } from '@core/loadouts'
 import { DEMO_REVIEWS, seedPullRequests } from '@core/demo/seed'
@@ -445,6 +445,20 @@ describe('App shell', () => {
     fireEvent.keyDown(button.closest('tr')!, { key: 'Enter' })
     expect(screen.getByRole('complementary', { name: 'Review details' })).toBeTruthy()
     expect(useAppStore.getState().selectedMissionId).toBe('m-77')
+  })
+
+  it('focuses the search box on ⌘F, and goes to the Inbox from a screen without one', async () => {
+    render(<App />)
+    nav('Inbox')
+    fireEvent.keyDown(window, { key: 'f', metaKey: true })
+    expect(document.activeElement).toBe(screen.getByLabelText('Search pull requests'))
+    nav('Log')
+    fireEvent.keyDown(window, { key: 'f', metaKey: true })
+    expect(useAppStore.getState().screen).toBe('inbox')
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Search pull requests')))
+    nav('Triage')
+    fireEvent.keyDown(window, { key: 'F', metaKey: true })
+    expect(document.activeElement).toBe(screen.getByLabelText('Search reviews'))
   })
 
   it('reports a failed worktree removal on a closed review', async () => {

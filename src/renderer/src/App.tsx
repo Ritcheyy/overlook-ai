@@ -28,6 +28,15 @@ function useExternalLinks() {
   }, [])
 }
 
+/** Focuses the search box on screen, selecting what is in it; false when the screen has none. */
+function focusSearch(): boolean {
+  const box = document.querySelector<HTMLInputElement>('input[data-search]')
+  if (!box) return false
+  box.focus()
+  box.select()
+  return true
+}
+
 function useScreenShortcuts() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -35,6 +44,15 @@ function useScreenShortcuts() {
       if (e.key.toLowerCase() === 'r') {
         e.preventDefault()
         if (!e.repeat) void useAppStore.getState().refreshInbox()
+        return
+      }
+      if (e.key.toLowerCase() === 'f') {
+        e.preventDefault()
+        if (!focusSearch()) {
+          // A screen without a search box hands the key to the Inbox, whose box exists once it renders.
+          useAppStore.getState().navigate('inbox')
+          setTimeout(focusSearch, 0)
+        }
         return
       }
       const item = NAV_ITEMS.find((n) => n.key === e.key)

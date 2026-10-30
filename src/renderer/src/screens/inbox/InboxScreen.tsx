@@ -10,6 +10,7 @@ import { Chip } from '@/components/ui/Chip'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { IconButton } from '@/components/ui/IconButton'
 import { Input } from '@/components/ui/Input'
+import { Kbd } from '@/components/ui/Kbd'
 import { Segmented } from '@/components/ui/Segmented'
 import { PrMarkers } from '@/components/app/PrMarkers'
 import { RefreshButton } from '@/components/app/RefreshButton'
@@ -199,8 +200,10 @@ export function InboxScreen() {
         />
         <Input
           leading={<Search />}
+          trailing={<Kbd>⌘F</Kbd>}
           placeholder="Search title, author, repo…"
           aria-label="Search pull requests"
+          data-search
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           wrapperClassName="w-[240px]"
