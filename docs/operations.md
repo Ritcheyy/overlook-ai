@@ -79,6 +79,14 @@ A delta round only reads the commits pushed since the last posted round, so on i
 
 The status line under a push says whether a clean delta would be followed by a full pass. A full pass costs what a first review costs, and a delta-plus-full round can spend up to twice the per-review budget, since the budget applies to each pass. Settings > General > "Full pass before approving" switches the chained pass off; a re-run with nothing pushed and "Read the whole PR" still read the whole PR. If the full pass fails (budget, timeout), the delta findings stand, the verdict is capped at Comments, and the round offers "Retry the full pass", which starts a whole-PR round at the same head.
 
+## Keyboard
+
+⌘1 to ⌘5 switch screens in rail order, ⌘R refreshes the inbox from any screen, and ⌘F focuses the search box of the Inbox or the Triage list, going to the Inbox from a screen without one.
+
+## Polling and refresh
+
+The Inbox is polled every poll interval (Settings > General) and on demand: the refresh button sits in the rail, on the Inbox header and on a PR's details header, and ⌘R refreshes from any screen. A poll runs the review-requested and my-PRs searches side by side, then reads every PR with a live review in batches of twenty through one GraphQL query each, with the conversation only for watched ones, so a refresh takes seconds rather than one `gh` call per PR in turn. A PR the batch cannot read (gone, or access lost) keeps its last snapshot until the next poll.
+
 ## Notifications
 
 Every notification carries its next step. The macOS notification shows one button when you hover over it: Review now on a new review request, Open triage when findings are ready, Review the delta or Review again after a push or a reply, Retry after a failure. macOS only reveals notification buttons on hover, and folds two or more into an Options menu, which is why the notification carries one. Inside the app, the same notification shows as a toast at the bottom right for twelve seconds with all its actions, Ignore included.

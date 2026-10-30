@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ExecFn, ExecOptions, ExecResult } from './exec'
-import { DETAIL_FIELDS, DETAIL_WITH_COMMENTS_FIELDS, GhCliGitHub, SEARCH_FIELDS } from './gh-cli'
+import { DETAIL_BATCH, GhCliGitHub, SEARCH_FIELDS } from './gh-cli'
 
 interface Call {
   cmd: string
@@ -38,7 +38,14 @@ function searchItem(fullName: string, number: number, updatedAt: string, author 
   }
 }
 
-function detail(fullName: string, number: number, updatedAt: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
+/** A PullRequest node as the GraphQL batch returns it: connections wrapped in `nodes`. */
+function node(fullName: string, number: number, updatedAt: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  const { labels, reviewRequests, comments, ...rest } = {
+    labels: [{ name: 'backend' }] as Record<string, unknown>[],
+    reviewRequests: [] as Record<string, unknown>[],
+    comments: undefined as Record<string, unknown>[] | undefined,
+    ...extra
+  }
   return {
     number,
     title: `PR ${number}`,
@@ -54,16 +61,61 @@ function detail(fullName: string, number: number, updatedAt: string, extra: Reco
     state: 'OPEN',
     isDraft: false,
     mergedAt: null,
-    labels: [{ name: 'backend' }],
     createdAt: '2026-09-13T08:00:00Z',
     updatedAt,
-    reviewRequests: [],
-    ...extra
+    reviewDecision: null,
+    ...rest,
+    labels: { nodes: labels },
+    reviewRequests: { nodes: reviewRequests.map((r) => ({ requestedReviewer: r })) },
+    ...(comments && { comments: { nodes: comments } })
   }
 }
 
-function repoAndNumber(args: string[]): { fullName: string; number: number } {
-  return { fullName: args[args.indexOf('--repo') + 1]!, number: Number(args[2]) }
+interface AskedRef {
+  alias: string
+  fullName: string
+  number: number
+  comments: boolean
+}
+
+function queryOf(args: string[]): string | undefined {
+  return args[0] === 'api' && args[1] === 'graphql' ? args[3]!.slice('query='.length) : undefined
+}
+
+/** The PRs one batched query asks for, in alias order. */
+function refsIn(query: string): AskedRef[] {
+  const re = /p(\d+): repository\(owner: "([^"]+)", name: "([^"]+)"\) \{ pullRequest\(number: (\d+)\) \{ \.\.\.Pr( comments\(last: \d+\))?/g
+  return [...query.matchAll(re)].map((m) => ({ alias: `p${m[1]}`, fullName: `${m[2]}/${m[3]}`, number: Number(m[4]), comments: !!m[5] }))
+}
+
+/** Every PR asked for across the batched queries so far. */
+function asked(calls: Call[]): AskedRef[] {
+  return calls.flatMap((c) => {
+    const q = queryOf(c.args)
+    return q ? refsIn(q) : []
+  })
+}
+
+/** Answers a batched query from a per-PR node factory; null leaves that alias unresolved, the way gh reports it. */
+function graphql(query: string, nodeFor: (fullName: string, number: number, comments: boolean) => Record<string, unknown> | null | 'no-repo'): ExecResult {
+  const data: Record<string, unknown> = {}
+  const errors: { message: string }[] = []
+  for (const ref of refsIn(query)) {
+    const n = nodeFor(ref.fullName, ref.number, ref.comments)
+    data[ref.alias] = n === 'no-repo' ? null : { pullRequest: n }
+    if (!n) errors.push({ message: `Could not resolve to a PullRequest with the number of ${ref.number}.` })
+    if (n === 'no-repo') errors.push({ message: `Could not resolve to a Repository with the name '${ref.fullName}'.` })
+  }
+  return { stdout: JSON.stringify(errors.length ? { data, errors } : { data }), stderr: errors.map((e) => `gh: ${e.message}`).join('\n'), code: errors.length ? 1 : 0 }
+}
+
+/** Login and teams (none) answered; the rest handed on. */
+function withLogin(handler: Handler): Handler {
+  return (args, opts) => {
+    if (args[0] === 'api' && args[1] === 'user') return ok('octo-reviewer')
+    if (args[0] === 'api' && args[1] === 'user/teams') return ok('')
+    return handler(args, opts)
+  }
 }
 
 describe('GhCliGitHub', () => {
@@ -85,18 +137,15 @@ describe('GhCliGitHub', () => {
     expect(await gh.me()).toBe('octo-reviewer')
   })
 
-  it('lists review-requested PRs by combining search results with detail calls', async () => {
-    const { exec, calls } = fakeGh((args) => {
-      if (args[0] === 'api') return ok('octo-reviewer')
-      if (args[0] === 'search') {
-        return ok(JSON.stringify([searchItem('acme/checkout-api', 412, 't1'), searchItem('acme/storefront-web', 1203, 't2')]))
-      }
-      if (args[0] === 'pr' && args[1] === 'view') {
-        const { fullName, number } = repoAndNumber(args)
-        return ok(JSON.stringify(detail(fullName, number, number === 412 ? 't1' : 't2')))
-      }
-      throw new Error(`unexpected ${args.join(' ')}`)
-    })
+  it('lists review-requested PRs by combining search results with one batched detail query', async () => {
+    const { exec, calls } = fakeGh(
+      withLogin((args) => {
+        if (args[0] === 'search') return ok(JSON.stringify([searchItem('acme/checkout-api', 412, 't1'), searchItem('acme/storefront-web', 1203, 't2')]))
+        const q = queryOf(args)
+        if (q) return graphql(q, (fullName, number) => node(fullName, number, number === 412 ? 't1' : 't2'))
+        throw new Error(`unexpected ${args.join(' ')}`)
+      })
+    )
     const gh = new GhCliGitHub({ exec })
     const prs = await gh.listReviewRequested()
 
@@ -105,62 +154,72 @@ describe('GhCliGitHub', () => {
     const search = calls.find((c) => c.args[0] === 'search')!
     expect(search.args).toEqual(['search', 'prs', '--review-requested=@me', '--state=open', '--sort', 'updated', '--limit', '50', '--json', SEARCH_FIELDS])
     expect(calls.find((c) => c.args[1] === 'user/teams')?.args).toEqual(['api', 'user/teams', '--paginate', '--jq', '.[] | "\\(.organization.login)/\\(.slug)"'])
-    const views = calls.filter((c) => c.args[1] === 'view')
-    expect(views).toHaveLength(2)
-    expect(views[0]!.args).toEqual(['pr', 'view', '412', '--repo', 'acme/checkout-api', '--json', DETAIL_FIELDS])
+    expect(calls.filter((c) => queryOf(c.args))).toHaveLength(1)
+    expect(asked(calls)).toEqual([
+      { alias: 'p0', fullName: 'acme/checkout-api', number: 412, comments: false },
+      { alias: 'p1', fullName: 'acme/storefront-web', number: 1203, comments: false }
+    ])
   })
 
   it('lists my PRs with --author=@me and marks them mine', async () => {
-    const { exec, calls } = fakeGh((args) => {
-      if (args[0] === 'api') return ok('octo-reviewer')
-      if (args[0] === 'search') return ok(JSON.stringify([searchItem('acme/checkout-api', 419, 't1', 'octo-reviewer')]))
-      const { fullName, number } = repoAndNumber(args)
-      return ok(JSON.stringify(detail(fullName, number, 't1', { author: { login: 'octo-reviewer' } })))
-    })
+    const { exec, calls } = fakeGh(
+      withLogin((args) => {
+        if (args[0] === 'search') return ok(JSON.stringify([searchItem('acme/checkout-api', 419, 't1', 'octo-reviewer')]))
+        return graphql(queryOf(args)!, (fullName, number) => node(fullName, number, 't1', { author: { login: 'octo-reviewer' } }))
+      })
+    )
     const prs = await new GhCliGitHub({ exec }).listMine()
     expect(prs).toHaveLength(1)
     expect(prs[0]).toMatchObject({ mine: true, reviewRequested: false })
     expect(calls.find((c) => c.args[0] === 'search')!.args).toContain('--author=@me')
   })
 
-  it('skips detail calls for PRs whose updatedAt is unchanged since the last poll', async () => {
+  it('skips detail reads for PRs whose updatedAt is unchanged since the last poll', async () => {
     let stamp412 = 't1'
-    const { exec, calls } = fakeGh((args) => {
-      if (args[0] === 'api') return ok('octo-reviewer')
-      if (args[0] === 'search') return ok(JSON.stringify([searchItem('acme/checkout-api', 412, stamp412), searchItem('acme/checkout-api', 413, 't1')]))
-      const { fullName, number } = repoAndNumber(args)
-      return ok(JSON.stringify(detail(fullName, number, number === 412 ? stamp412 : 't1', { headRefOid: `${stamp412}`.padEnd(40, '0') })))
-    })
+    let stamp413 = 't1'
+    const { exec, calls } = fakeGh(
+      withLogin((args) => {
+        if (args[0] === 'search') return ok(JSON.stringify([searchItem('acme/checkout-api', 412, stamp412), searchItem('acme/checkout-api', 413, 't1')]))
+        return graphql(queryOf(args)!, (fullName, number) => node(fullName, number, number === 412 ? stamp412 : stamp413, { headRefOid: `${stamp412}`.padEnd(40, '0') }))
+      })
+    )
     const gh = new GhCliGitHub({ exec })
     await gh.listReviewRequested()
-    expect(calls.filter((c) => c.args[1] === 'view')).toHaveLength(2)
+    expect(asked(calls)).toHaveLength(2)
 
     await gh.listReviewRequested()
-    expect(calls.filter((c) => c.args[1] === 'view')).toHaveLength(2)
+    expect(asked(calls)).toHaveLength(2)
 
     stamp412 = 't9'
     const prs = await gh.listReviewRequested()
-    const views = calls.filter((c) => c.args[1] === 'view')
-    expect(views).toHaveLength(3)
-    expect(views[2]!.args[2]).toBe('412')
+    expect(asked(calls)).toHaveLength(3)
+    expect(asked(calls)[2]!.number).toBe(412)
     expect(prs.find((p) => p.number === 412)!.headSha).toBe('t9'.padEnd(40, '0'))
+    expect(prs).toHaveLength(2)
+
+    // A live review read 413 fresh, newer than the search index's stamp: the listing trusts that read.
+    stamp413 = 't5'
+    await gh.getPullRequest('acme/checkout-api', 413, { comments: true })
+    expect(asked(calls)).toHaveLength(4)
+    await gh.listReviewRequested()
+    expect(asked(calls)).toHaveLength(4)
   })
 
-  it('applies the search filter: --updated for the age cut-off and no detail call for inactive repos', async () => {
+  it('applies the search filter: --updated for the age cut-off and no detail read for inactive repos', async () => {
     let filter: { inactiveRepos?: string[]; updatedSince?: string } = {}
-    // A fresh stamp per search defeats the detail cache, so a skipped view call can only come from the filter.
+    // A fresh stamp per search defeats the detail cache, so a skipped read can only come from the filter.
     let stamp = 0
-    const { exec, calls } = fakeGh((args) => {
-      if (args[0] === 'api') return ok('octo-reviewer')
-      if (args[0] === 'search') return ok(JSON.stringify([searchItem('acme/checkout-api', 412, `t${++stamp}`), searchItem('acme/legacy', 9, `t${stamp}`)]))
-      const { fullName, number } = repoAndNumber(args)
-      return ok(JSON.stringify(detail(fullName, number, `t${stamp}`)))
-    })
+    const { exec, calls } = fakeGh(
+      withLogin((args) => {
+        if (args[0] === 'search') return ok(JSON.stringify([searchItem('acme/checkout-api', 412, `t${++stamp}`), searchItem('acme/legacy', 9, `t${stamp}`)]))
+        return graphql(queryOf(args)!, (fullName, number) => node(fullName, number, `t${stamp}`))
+      })
+    )
     const gh = new GhCliGitHub({ exec, filter: () => filter })
 
     expect((await gh.listReviewRequested()).map((p) => p.id)).toEqual(['acme/checkout-api#412', 'acme/legacy#9'])
     expect(calls.find((c) => c.args[0] === 'search')!.args).not.toContain('--updated')
-    expect(calls.filter((c) => c.args[1] === 'view')).toHaveLength(2)
+    expect(asked(calls)).toHaveLength(2)
 
     calls.length = 0
     filter = { inactiveRepos: ['acme/legacy'], updatedSince: '2026-08-14' }
@@ -169,71 +228,105 @@ describe('GhCliGitHub', () => {
     const search = calls.find((c) => c.args[0] === 'search')!.args
     expect(search.slice(-2)).toEqual(['--updated', '>=2026-08-14'])
     expect(search).toContain('--author=@me')
-    expect(calls.filter((c) => c.args[1] === 'view').map((c) => c.args[4])).toEqual(['acme/checkout-api'])
+    expect(asked(calls).map((r) => r.fullName)).toEqual(['acme/checkout-api'])
 
     calls.length = 0
     filter = { inactiveRepos: ['acme/checkout-api', 'acme/legacy'] }
     expect(await gh.listReviewRequested()).toEqual([])
-    expect(calls.filter((c) => c.args[1] === 'view')).toHaveLength(0)
+    expect(asked(calls)).toHaveLength(0)
   })
 
-  it('runs at most four detail calls at a time', async () => {
+  it('reads details twenty PRs per query, three queries at a time, in listing order', async () => {
     let inFlight = 0
     let peak = 0
-    const items = Array.from({ length: 10 }, (_, i) => searchItem('acme/checkout-api', 100 + i, 't1'))
-    const { exec } = fakeGh(async (args) => {
-      if (args[0] === 'api') return ok('octo-reviewer')
-      if (args[0] === 'search') return ok(JSON.stringify(items))
-      inFlight++
-      peak = Math.max(peak, inFlight)
-      await new Promise((r) => setTimeout(r, 2))
-      inFlight--
-      const { fullName, number } = repoAndNumber(args)
-      return ok(JSON.stringify(detail(fullName, number, 't1')))
-    })
+    const items = Array.from({ length: 70 }, (_, i) => searchItem('acme/checkout-api', 100 + i, 't1'))
+    const { exec, calls } = fakeGh(
+      withLogin(async (args) => {
+        if (args[0] === 'search') return ok(JSON.stringify(items))
+        inFlight++
+        peak = Math.max(peak, inFlight)
+        await new Promise((r) => setTimeout(r, 2))
+        inFlight--
+        return graphql(queryOf(args)!, (fullName, number) => node(fullName, number, 't1'))
+      })
+    )
     const prs = await new GhCliGitHub({ exec }).listReviewRequested()
-    expect(prs).toHaveLength(10)
+    expect(prs).toHaveLength(70)
     expect(prs.map((p) => p.number)).toEqual(items.map((i) => i['number']))
-    expect(peak).toBe(4)
+    const queries = calls.filter((c) => queryOf(c.args))
+    expect(queries).toHaveLength(4)
+    expect(queries.map((c) => refsIn(queryOf(c.args)!).length)).toEqual([DETAIL_BATCH, DETAIL_BATCH, DETAIL_BATCH, 10])
+    expect(peak).toBe(3)
   })
 
   it('fetches one PR and computes reviewRequested from reviewRequests', async () => {
-    const { exec } = fakeGh((args) => {
-      if (args[0] === 'api') return ok('octo-reviewer')
-      const { fullName, number } = repoAndNumber(args)
-      return ok(JSON.stringify(detail(fullName, number, 't1', { state: 'MERGED', mergedAt: '2026-09-13T12:00:00Z', reviewRequests: [{ login: 'octo-Reviewer' }] })))
-    })
+    const { exec } = fakeGh(withLogin((args) => graphql(queryOf(args)!, (fullName, number) => node(fullName, number, 't1', { state: 'MERGED', mergedAt: '2026-09-13T12:00:00Z', reviewRequests: [null, { login: 'octo-Reviewer' }] }))))
     const pr = await new GhCliGitHub({ exec }).getPullRequest('acme/checkout-api', 412)
     expect(pr).toMatchObject({ id: 'acme/checkout-api#412', state: 'merged', reviewRequested: true, mine: false })
   })
 
   it('asks for the conversation only when told to, and maps it with the review decision', async () => {
-    const { exec, calls } = fakeGh((args) => {
-      if (args[0] === 'api') return ok('octo-reviewer')
-      const { fullName, number } = repoAndNumber(args)
-      return ok(
-        JSON.stringify(
-          detail(fullName, number, 't1', {
+    const { exec, calls } = fakeGh(
+      withLogin((args) =>
+        graphql(queryOf(args)!, (fullName, number, comments) =>
+          node(fullName, number, 't1', {
             reviewDecision: 'APPROVED',
-            comments: [
-              { author: { login: 'dami-codes' }, body: 'Fixed both.', createdAt: '2026-09-13T12:00:00Z', url: 'https://github.com/acme/checkout-api/pull/412#issuecomment-7', id: 'IC_1' },
-              { author: null, body: null, createdAt: '2026-09-13T12:01:00Z', url: 'https://github.com/acme/checkout-api/pull/412#issuecomment-8' }
-            ]
+            ...(comments && {
+              comments: [
+                { author: { login: 'dami-codes' }, body: 'Fixed both.', createdAt: '2026-09-13T12:00:00Z', url: 'https://github.com/acme/checkout-api/pull/412#issuecomment-7', id: 'IC_1' },
+                { author: null, body: null, createdAt: '2026-09-13T12:01:00Z', url: 'https://github.com/acme/checkout-api/pull/412#issuecomment-8' }
+              ]
+            })
           })
         )
       )
-    })
+    )
     const gh = new GhCliGitHub({ exec })
     const plain = await gh.getPullRequest('acme/checkout-api', 412)
-    expect(calls.find((c) => c.args[0] === 'pr')!.args).toEqual(['pr', 'view', '412', '--repo', 'acme/checkout-api', '--json', DETAIL_FIELDS])
+    expect(asked(calls)).toEqual([{ alias: 'p0', fullName: 'acme/checkout-api', number: 412, comments: false }])
     expect(plain.comments).toBeUndefined()
     expect(plain.reviewDecision).toBe('approved')
     const withComments = await gh.getPullRequest('acme/checkout-api', 412, { comments: true })
-    expect(calls.filter((c) => c.args[0] === 'pr').pop()!.args).toEqual(['pr', 'view', '412', '--repo', 'acme/checkout-api', '--json', DETAIL_WITH_COMMENTS_FIELDS])
+    expect(asked(calls).at(-1)).toEqual({ alias: 'p0', fullName: 'acme/checkout-api', number: 412, comments: true })
     expect(withComments.comments).toEqual([
       { url: 'https://github.com/acme/checkout-api/pull/412#issuecomment-7', author: 'dami-codes', body: 'Fixed both.', createdAt: '2026-09-13T12:00:00Z' },
       { url: 'https://github.com/acme/checkout-api/pull/412#issuecomment-8', author: 'ghost', body: '', createdAt: '2026-09-13T12:01:00Z' }
     ])
+  })
+
+  it('reads many PRs in one query, keeps the ones that resolved when one cannot be read, and asks for comments where wanted', async () => {
+    const { exec, calls } = fakeGh(withLogin((args) => graphql(queryOf(args)!, (fullName, number, comments) => (fullName === 'acme/gone' ? 'no-repo' : number === 999 ? null : node(fullName, number, 't1', comments ? { comments: [] } : {})))))
+    const gh = new GhCliGitHub({ exec })
+    const got = await gh.getPullRequests([
+      { fullName: 'acme/checkout-api', number: 412, comments: true },
+      { fullName: 'acme/checkout-api', number: 999 },
+      { fullName: 'acme/storefront-web', number: 1203 },
+      { fullName: 'acme/gone', number: 1 },
+      { fullName: 'not a repo', number: 1 }
+    ])
+    expect([...got.keys()]).toEqual(['acme/checkout-api#412', 'acme/storefront-web#1203'])
+    expect(got.get('acme/checkout-api#412')?.comments).toEqual([])
+    expect(got.get('acme/storefront-web#1203')?.comments).toBeUndefined()
+    expect(calls.filter((c) => queryOf(c.args))).toHaveLength(1)
+    expect(asked(calls).map((r) => [r.number, r.comments])).toEqual([
+      [412, true],
+      [999, false],
+      [1203, false],
+      [1, false]
+    ])
+    await expect(gh.getPullRequest('acme/checkout-api', 999)).rejects.toThrow(/acme\/checkout-api#999 could not be read/)
+  })
+
+  it('fails a batch that returns no data, keeping the reason gh gives', async () => {
+    const { exec } = fakeGh(withLogin(() => ({ stdout: '{"data":null,"errors":[{"message":"Something went wrong"}]}', stderr: '', code: 1 })))
+    await expect(new GhCliGitHub({ exec }).getPullRequest('acme/checkout-api', 412)).rejects.toThrow(/gh api graphql returned no data: Something went wrong/)
+    // An auth or rate-limit answer is a plain message body, and gh puts the status on stderr.
+    const { exec: exec401 } = fakeGh(withLogin(() => ({ stdout: '{"message":"Bad credentials","documentation_url":"https://docs.github.com"}', stderr: 'gh: Bad credentials (HTTP 401)', code: 1 })))
+    await expect(new GhCliGitHub({ exec: exec401 }).getPullRequest('acme/checkout-api', 412)).rejects.toThrow(/^gh api graphql failed \(exit 1\): gh: Bad credentials \(HTTP 401\)/)
+    const { exec: execMessage } = fakeGh(withLogin(() => ok('{"message":"API rate limit exceeded"}')))
+    await expect(new GhCliGitHub({ exec: execMessage }).getPullRequest('acme/checkout-api', 412)).rejects.toThrow(/gh api graphql returned no data: API rate limit exceeded/)
+    const { exec: exec2 } = fakeGh(withLogin(() => ({ stdout: '', stderr: 'boom', code: 1 })))
+    await expect(new GhCliGitHub({ exec: exec2 }).getPullRequest('acme/checkout-api', 412)).rejects.toThrow(/^gh api graphql failed \(exit 1\): boom/)
   })
 
   it('returns the diff verbatim', async () => {
@@ -285,8 +378,7 @@ describe('GhCliGitHub', () => {
           if (team === 'acme/platform' && opts.platformFails) return { stdout: '', stderr: 'GraphQL: something broke', code: 1 }
           return ok('[]')
         }
-        const { fullName, number } = repoAndNumber(args)
-        return ok(JSON.stringify(detail(fullName, number, number === 500 ? 't3' : 't1')))
+        return graphql(queryOf(args)!, (fullName, number) => node(fullName, number, number === 500 ? 't3' : 't1'))
       }
     }
 
@@ -302,7 +394,7 @@ describe('GhCliGitHub', () => {
       expect(searches[0]!).toContain('--review-requested=@me')
       expect(searches[1]!.slice(0, 7)).toEqual(['search', 'prs', 'team-review-requested:acme/backend', '--state=open', '--sort', 'updated', '--limit'])
       expect(searches[2]![2]).toBe('team-review-requested:acme/platform')
-      expect(calls.filter((c) => c.args[1] === 'view')).toHaveLength(2)
+      expect(new Set(asked(calls).map((r) => r.number))).toEqual(new Set([412, 500]))
 
       await gh.listReviewRequested()
       expect(calls.filter((c) => c.args[1] === 'user/teams')).toHaveLength(1)

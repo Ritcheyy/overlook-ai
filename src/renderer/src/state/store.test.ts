@@ -5,6 +5,7 @@ import { seedPullRequests } from '@core/demo/seed'
 
 vi.mock('@/lib/api', () => ({ api: {}, onPush: vi.fn(() => () => {}), isElectron: false }))
 
+import { api } from '@/lib/api'
 import { selectActivityFor, selectInbox, selectMissions, selectMissionsInState, selectQueue, selectSlots, useAppStore } from './store'
 
 const prs = seedPullRequests(new Date('2026-09-13T12:00:00Z'))
@@ -106,3 +107,13 @@ describe('openDetails', () => {
   })
 })
 
+
+describe('refreshInbox', () => {
+  it('reports a poll error the engine kept in the snapshot as a failed refresh', async () => {
+    ;(api as unknown as Record<string, unknown>)['refreshInbox'] = vi.fn(async () => ({ ...snapshot, pollError: 'gh: not logged in' }))
+    useAppStore.setState({ toasts: [] })
+    await useAppStore.getState().refreshInbox()
+    expect(useAppStore.getState().refreshing).toBe(false)
+    expect(useAppStore.getState().toasts.at(-1)).toMatchObject({ kind: 'error', title: 'Refresh failed', body: 'gh: not logged in' })
+  })
+})

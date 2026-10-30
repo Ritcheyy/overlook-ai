@@ -5,6 +5,7 @@ import { selectInbox, selectMissions, useAppStore, type TriageFilter } from '@/s
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { Kbd } from '@/components/ui/Kbd'
 import { Segmented } from '@/components/ui/Segmented'
 import { useNow } from '@/components/app/useNow'
 import { DetailsPane } from './DetailsPane'
@@ -45,7 +46,7 @@ export function TriageScreen() {
           <span className="text-[12px] tabular-nums text-faint">{counts.needsYou} waiting</span>
         </div>
         <div className="flex shrink-0 flex-col gap-2 border-b border-line p-2.5">
-          <Input leading={<Search />} size="sm" placeholder="Search reviews" aria-label="Search reviews" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <Input leading={<Search />} trailing={<Kbd>⌘F</Kbd>} size="sm" placeholder="Search reviews" aria-label="Search reviews" data-search value={query} onChange={(e) => setQuery(e.target.value)} />
           <Segmented<TriageFilter>
             aria-label="Filter reviews"
             size="sm"

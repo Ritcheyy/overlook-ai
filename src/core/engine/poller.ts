@@ -6,7 +6,7 @@
  */
 import type { Mission, MissionState, PrComment, PullRequest, Settings } from '../domain'
 import { autoRoundsUsed, commentIdOf, lastPostedRound, latestRound, shortSha } from '../domain'
-import type { GitHubPort, PullRequestDetail } from '../ports'
+import type { GitHubPort, PullRequestDetail, PullRequestRef } from '../ports'
 import { NEW_PR_BURST, OPEN, newPullRequestNotification, newPullRequestsSummary, rerun } from '../notifications'
 import { trimReplies } from './run-options'
 import { errorMessage, type Scheduler } from './scheduler'
@@ -96,19 +96,16 @@ export function mergeListings(requested: PullRequest[], mine: PullRequest[]): Ma
   return byId
 }
 
+/** Fresh detail for every live mission's PR, batched; one the batch cannot read keeps its listing copy or last snapshot. */
 async function fetchMissionPrs(github: GitHubPort, missions: Mission[], listed: Map<string, PullRequest>): Promise<Map<string, PullRequestDetail>> {
-  const fetched = new Map<string, PullRequestDetail>()
+  const refs = new Map<string, PullRequestRef>()
   for (const m of missions) {
-    if (m.state === 'closed' || fetched.has(m.prId)) continue
+    if (m.state === 'closed' || refs.has(m.prId)) continue
     if (!FRESH_STATES.includes(m.state) && listed.has(m.prId)) continue
-    try {
-      // Watched PRs are the ones a reply can move on, so only they pay for the comments.
-      fetched.set(m.prId, await github.getPullRequest(m.pr.repo.fullName, m.pr.number, { comments: m.state === 'watching' }))
-    } catch {
-      // Unreachable for now; the listing copy or the PR as last seen stands in.
-    }
+    // Watched PRs are the ones a reply can move on, so only they pay for the comments.
+    refs.set(m.prId, { fullName: m.pr.repo.fullName, number: m.pr.number, comments: m.state === 'watching' })
   }
-  return fetched
+  return refs.size === 0 ? new Map() : github.getPullRequests([...refs.values()])
 }
 
 /** New PRs from other people, and drafts just marked ready. The first poll ever is a silent baseline. */
@@ -148,17 +145,23 @@ export async function pollInbox(sched: Scheduler): Promise<void> {
   let fetched: Map<string, PullRequestDetail>
   try {
     if (!state.githubLogin) state.githubLogin = await github.me()
-    const requested = await github.listReviewRequested()
-    const mine = state.settings.includeMine ? await github.listMine() : []
+    const [requested, mine] = await Promise.all([github.listReviewRequested(), state.settings.includeMine ? github.listMine() : []])
     listed = mergeListings(requested, mine)
     applyInboxFilters(listed, state.missions, state.settings, sched.ports.clock.now())
-    fetched = await fetchMissionPrs(github, state.missions, listed)
   } catch (e) {
     state.pollError = errorMessage(e)
     sched.changed()
     return
   }
-  state.pollError = undefined
+  // The listing stands on its own: when the batch read of the PRs under review fails, the
+  // inbox still updates, each review keeps its last snapshot, and the rail says what failed.
+  try {
+    fetched = await fetchMissionPrs(github, state.missions, listed)
+    state.pollError = undefined
+  } catch (e) {
+    fetched = new Map()
+    state.pollError = `Could not read the PRs under review: ${errorMessage(e)}`
+  }
   state.lastPollAt = sched.now()
 
   try {

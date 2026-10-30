@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { AppSnapshot, Mission, PullRequest, RunOptions, Settings, Workspace } from '../domain'
 import { latestRound, repoRefFromFullName } from '../domain'
 import type { Api, Engine } from '../ipc-contract'
-import type { PersistedState, ReviewRequest, ReviewResult, RunnerPort } from '../ports'
+import type { PersistedState, PullRequestRef, ReviewRequest, ReviewResult, RunnerPort } from '../ports'
 import { RETIRED_SLASH_COMMANDS, defaultSettings } from '../loadouts'
 import { NEW_PR_BURST, OPEN, RETRY, rerun } from '../notifications'
 import { createEngine } from './api-server'
@@ -618,6 +618,46 @@ describe('engine', () => {
     await h.api.ignorePullRequest(pr.id)
     await h.api.unignorePullRequest(pr.id)
     expect((await h.api.getSnapshot()).ignoredPrs).toEqual({})
+  })
+
+  it('reads every PR under review in one batch per poll, with the conversation only for watched ones', async () => {
+    const h = await makeEngine()
+    const a = await h.api.dispatch({ prId: PR_412 })
+    await waitForState(h, a.id, 'needs_you')
+    await approveAndPost(h, a.id)
+    const b = await h.api.dispatch({ prId: PR_1203 })
+    await waitForState(h, b.id, 'needs_you')
+    const batches: PullRequestRef[][] = []
+    const original = h.github.getPullRequests.bind(h.github)
+    h.github.getPullRequests = async (refs) => {
+      batches.push([...refs])
+      return original(refs)
+    }
+    await h.api.refreshInbox()
+    expect(batches).toHaveLength(1)
+    expect(batches[0]).toHaveLength(2)
+    expect(batches[0]).toEqual(expect.arrayContaining([
+      { fullName: 'acme/checkout-api', number: 412, comments: true },
+      { fullName: 'acme/storefront-web', number: 1203, comments: false }
+    ]))
+  })
+
+  it('keeps the inbox fresh and says so when the batch read of the PRs under review fails', async () => {
+    const h = await makeEngine()
+    const a = await h.api.dispatch({ prId: PR_412 })
+    await waitForState(h, a.id, 'needs_you')
+    await approveAndPost(h, a.id)
+    const original = h.github.getPullRequests.bind(h.github)
+    h.github.getPullRequests = async () => {
+      throw new Error('HTTP 502')
+    }
+    const fresh = h.github.simulateNewPullRequest()
+    const snap = await h.api.refreshInbox()
+    expect(snap.pollError).toBe('Could not read the PRs under review: HTTP 502')
+    expect(snap.inbox.some((p) => p.id === fresh.id)).toBe(true)
+    expect(missionOf(snap, a.id).state).toBe('watching')
+    h.github.getPullRequests = original
+    expect((await h.api.refreshInbox()).pollError).toBeUndefined()
   })
 
   it('offers Retry on a failed review and Open triage when findings are ready', async () => {
