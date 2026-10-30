@@ -68,6 +68,10 @@ export interface AppState {
   init: () => Promise<void>
   /** Re-fetch the snapshot (used after actions whose push may race). */
   refresh: () => Promise<void>
+  /** A poll started from the UI is running; every refresh button spins on it. */
+  refreshing: boolean
+  /** Polls GitHub now; a failure becomes a toast. */
+  refreshInbox: () => Promise<void>
 }
 
 let initialised = false
@@ -80,6 +84,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   triageFilter: 'all',
   activity: {},
   toasts: [],
+  refreshing: false,
 
   navigate: (screen, opts = {}) => {
     const patch: Partial<AppState> = { screen }
@@ -124,6 +129,18 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ snapshot, loading: false, error: undefined })
     } catch (e) {
       set({ error: (e as Error).message, loading: false })
+    }
+  },
+
+  refreshInbox: async () => {
+    if (get().refreshing) return
+    set({ refreshing: true })
+    try {
+      await api.refreshInbox()
+    } catch (e) {
+      get().pushToast({ kind: 'error', title: 'Refresh failed', body: (e as Error).message })
+    } finally {
+      set({ refreshing: false })
     }
   },
 

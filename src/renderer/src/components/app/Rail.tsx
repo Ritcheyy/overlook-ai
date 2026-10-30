@@ -7,7 +7,6 @@ import {
   LayoutGrid,
   ListChecks,
   LoaderCircle,
-  RefreshCw,
   ScrollText,
   Settings,
   ShieldQuestion,
@@ -23,6 +22,7 @@ import { Chip } from '../ui/Chip'
 import { Dropdown, MenuItem, MenuLabel, MenuSeparator } from '../ui/Dropdown'
 import { IconButton } from '../ui/IconButton'
 import { Kbd } from '../ui/Kbd'
+import { RefreshButton } from './RefreshButton'
 import { useNow } from './useNow'
 
 export const NAV_ITEMS: { screen: Screen; label: string; icon: LucideIcon; key: string }[] = [
@@ -161,20 +161,7 @@ export function Rail() {
   const hasSnapshot = useAppStore((s) => s.snapshot !== null)
   const environment = useAppStore((s) => s.snapshot?.environment)
   const version = useAppStore((s) => s.snapshot?.version)
-  const pushToast = useAppStore((s) => s.pushToast)
   const now = useNow(20_000)
-  const [refreshing, setRefreshing] = useState(false)
-
-  const refresh = async () => {
-    setRefreshing(true)
-    try {
-      await api.refreshInbox()
-    } catch (e) {
-      pushToast({ kind: 'error', title: 'Refresh failed', body: (e as Error).message })
-    } finally {
-      setRefreshing(false)
-    }
-  }
 
   return (
     <aside className="flex h-full w-[220px] shrink-0 flex-col border-r border-line bg-surface" aria-label="Navigation">
@@ -227,9 +214,7 @@ export function Rail() {
               <span className="truncate">{lastPollAt ? `Synced ${relativeTime(lastPollAt, now)}` : 'Not synced yet'}</span>
             </span>
           )}
-          <IconButton size="sm" aria-label="Refresh inbox" onClick={refresh} disabled={refreshing}>
-            <RefreshCw className={cn(refreshing && 'animate-spin')} />
-          </IconButton>
+          <RefreshButton size="sm" />
         </div>
         {hasSnapshot && !demo && <EnvironmentChip />}
         <div className="flex items-center gap-2">

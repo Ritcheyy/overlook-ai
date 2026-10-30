@@ -1,8 +1,9 @@
 /**
  * Pure mapping from `gh` JSON payloads to the domain `PullRequest`.
- * `gh search prs` and `gh pr view` disagree on casing and shape (lowercase vs
- * uppercase state, no head refs in search results), which is why the search
- * result only identifies a PR and the detail payload fills it in.
+ * `gh search prs` and the PR detail disagree on casing and shape (lowercase
+ * vs uppercase state, no head refs in search results), which is why the search
+ * result only identifies a PR and the detail payload fills it in. Details come
+ * from a batched GraphQL query flattened to the `gh pr view --json` shape.
  */
 import { z } from 'zod'
 import type { PrComment, PullRequest, PullRequestState, ReviewDecision } from '@core/domain'
@@ -86,6 +87,46 @@ export function parseSearchResults(json: string): GhSearchPr[] {
 
 export function parsePrDetail(json: string): GhPrDetail {
   return ghPrDetailSchema.parse(parseJson(json.trim(), 'gh pr view'))
+}
+
+const graphqlBodySchema = z
+  .object({
+    data: z.record(z.string(), z.object({ pullRequest: z.record(z.string(), z.unknown()).nullish() }).passthrough().nullish()).nullish(),
+    errors: z.array(z.object({ message: z.string().optional() }).passthrough()).optional()
+  })
+  .passthrough()
+
+function nodesOf(connection: unknown): unknown[] {
+  const nodes = (connection as { nodes?: unknown } | null | undefined)?.nodes
+  return Array.isArray(nodes) ? nodes : []
+}
+
+/** A GraphQL PullRequest node in the shape `gh pr view --json` prints, so one schema serves both. */
+function flattenGraphqlPr(node: Record<string, unknown>): Record<string, unknown> {
+  const flat: Record<string, unknown> = {
+    ...node,
+    labels: nodesOf(node['labels']),
+    reviewRequests: nodesOf(node['reviewRequests']).map((r) => (r as { requestedReviewer?: unknown } | null)?.requestedReviewer ?? {})
+  }
+  if ('comments' in node) flat['comments'] = nodesOf(node['comments'])
+  return flat
+}
+
+/** The PRs that resolved in a batched query, by id; an alias GitHub could not resolve is skipped. */
+export function parseGraphqlDetails(json: string, aliases: readonly { alias: string; fullName: string }[]): Map<string, GhPrDetail> {
+  const body = graphqlBodySchema.parse(parseJson(json.trim(), 'gh api graphql'))
+  if (!body.data) {
+    const why = body.errors?.map((e) => e.message).filter(Boolean).join('; ')
+    throw new Error(`gh api graphql returned no data${why ? `: ${why}` : ''}`)
+  }
+  const out = new Map<string, GhPrDetail>()
+  for (const { alias, fullName } of aliases) {
+    const node = body.data[alias]?.pullRequest
+    if (!node) continue
+    const detail = ghPrDetailSchema.parse(flattenGraphqlPr(node))
+    out.set(prIdOf(fullName, detail.number), detail)
+  }
+  return out
 }
 
 function parseJson(text: string, source: string): unknown {

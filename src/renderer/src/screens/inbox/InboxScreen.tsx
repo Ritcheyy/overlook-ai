@@ -12,6 +12,7 @@ import { IconButton } from '@/components/ui/IconButton'
 import { Input } from '@/components/ui/Input'
 import { Segmented } from '@/components/ui/Segmented'
 import { PrMarkers } from '@/components/app/PrMarkers'
+import { RefreshButton } from '@/components/app/RefreshButton'
 import { RepoBadge, repoColor } from '@/components/app/RepoBadge'
 import { ReviewSplitButton } from '@/components/app/ReviewSplitButton'
 import { StateChip } from '@/components/app/StateChip'
@@ -130,7 +131,7 @@ export function InboxScreen() {
   const missions = useAppStore(selectMissions)
   const settings = useAppStore(selectSettings)
   const pollError = useAppStore((s) => s.snapshot?.pollError)
-  const pushToast = useAppStore((s) => s.pushToast)
+  const refreshInbox = useAppStore((s) => s.refreshInbox)
   const ignoredPrs = useAppStore(selectIgnoredPrs)
   const [filter, setFilter] = useState<Filter>('all')
   const [query, setQuery] = useState('')
@@ -204,6 +205,7 @@ export function InboxScreen() {
           onChange={(e) => setQuery(e.target.value)}
           wrapperClassName="w-[240px]"
         />
+        <RefreshButton />
       </header>
       {pollError && (
         <div className="border-b border-rose/30 bg-rose/10 px-5 py-1.5 text-[12px] text-rose" role="alert">
@@ -217,10 +219,7 @@ export function InboxScreen() {
             title="Inbox zero"
             description="No open pull requests are waiting for your review. New review requests show up here as GitHub is polled."
             action={
-              <Button
-                variant="secondary"
-                onClick={() => void api.refreshInbox().catch((e: Error) => pushToast({ kind: 'error', title: 'Refresh failed', body: e.message }))}
-              >
+              <Button variant="secondary" onClick={() => void refreshInbox()}>
                 Poll GitHub now
               </Button>
             }

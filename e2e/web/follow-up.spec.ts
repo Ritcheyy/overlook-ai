@@ -68,7 +68,8 @@ test("a push alone waits for the author's reply, and the reply starts the follow
   // Back on, the push still waits: only the author's reply starts a round.
   await toggle.click()
   await expect(toggle).toHaveAttribute('aria-checked', 'true')
-  await page.getByRole('button', { name: 'Refresh inbox' }).click()
+  // The details header carries its own refresh button; the rail has the other.
+  await page.getByRole('main').getByRole('button', { name: 'Refresh inbox' }).click()
   await expect(statusLine(page)).toContainText('A follow-up starts when dami-codes replies to the review.')
   await expect(page.locator('[data-round="2"]')).toHaveCount(0)
 

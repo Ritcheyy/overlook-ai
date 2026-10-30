@@ -2,6 +2,7 @@ import { app, BrowserWindow } from 'electron'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { bootstrap } from './bootstrap'
+import { installMenu } from './menu'
 import { appIconPath, createWindow } from './window'
 
 // Must run before `ready`: the e2e harness points each run at a fresh
@@ -20,6 +21,7 @@ app.whenReady().then(async () => {
     if (icon) app.dock?.setIcon(icon)
   }
   const engine = await bootstrap()
+  installMenu()
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

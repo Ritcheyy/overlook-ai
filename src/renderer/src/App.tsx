@@ -32,6 +32,11 @@ function useScreenShortcuts() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return
+      if (e.key === 'r') {
+        e.preventDefault()
+        if (!e.repeat) void useAppStore.getState().refreshInbox()
+        return
+      }
       const item = NAV_ITEMS.find((n) => n.key === e.key)
       if (!item) return
       e.preventDefault()

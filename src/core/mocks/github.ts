@@ -1,5 +1,5 @@
 import type { PrComment, PullRequest } from '../domain'
-import type { Clock, GitHubPort, PullRequestDetail } from '../ports'
+import type { Clock, GitHubPort, PullRequestDetail, PullRequestRef } from '../ports'
 import { systemClock } from '../ports'
 import { DEMO_LOGIN, seedPullRequests } from '../demo/seed'
 
@@ -64,10 +64,26 @@ export class MockGitHub implements GitHubPort {
 
   async getPullRequest(fullName: string, number: number, opts: { comments?: boolean } = {}): Promise<PullRequestDetail> {
     await this.lag()
+    const detail = this.detailOf(fullName, number, opts.comments)
+    if (!detail) throw new Error(`PR ${fullName}#${number} not found`)
+    return detail
+  }
+
+  async getPullRequests(refs: readonly PullRequestRef[]): Promise<Map<string, PullRequestDetail>> {
+    await this.lag()
+    const out = new Map<string, PullRequestDetail>()
+    for (const ref of refs) {
+      const detail = this.detailOf(ref.fullName, ref.number, ref.comments)
+      if (detail) out.set(detail.id, detail)
+    }
+    return out
+  }
+
+  private detailOf(fullName: string, number: number, comments?: boolean): PullRequestDetail | undefined {
     const p = this.prs.get(`${fullName}#${number}`)
-    if (!p) throw new Error(`PR ${fullName}#${number} not found`)
+    if (!p) return undefined
     const detail: PullRequestDetail = structuredClone(p)
-    if (opts.comments) detail.comments = structuredClone(this.conversation.get(p.id) ?? [])
+    if (comments) detail.comments = structuredClone(this.conversation.get(p.id) ?? [])
     return detail
   }
 

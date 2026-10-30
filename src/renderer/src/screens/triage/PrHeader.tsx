@@ -6,6 +6,7 @@ import { plural, relativeTime } from '@/lib/format'
 import { Chip } from '@/components/ui/Chip'
 import { Dropdown, MenuItem } from '@/components/ui/Dropdown'
 import { IconButton } from '@/components/ui/IconButton'
+import { RefreshButton } from '@/components/app/RefreshButton'
 import { RepoBadge } from '@/components/app/RepoBadge'
 import { StateChip } from '@/components/app/StateChip'
 import { GitHubDecision } from '@/components/app/PrMarkers'
@@ -128,6 +129,7 @@ export function PrHeader({ pr, mission, now }: PrHeaderProps) {
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          <RefreshButton />
           <IconButton aria-label="Open on GitHub" title={pr.url} onClick={() => void api.openExternal(pr.url)}>
             <Github />
           </IconButton>

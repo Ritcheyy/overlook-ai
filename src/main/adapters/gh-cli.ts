@@ -1,10 +1,10 @@
 import type { PullRequest } from '@core/domain'
 import { prIdOf } from '@core/domain'
-import type { GitHubPort, PullRequestDetail } from '@core/ports'
+import type { GitHubPort, PullRequestDetail, PullRequestRef } from '@core/ports'
 import { exec as defaultExec } from './exec'
 import type { ExecFn, ExecResult } from './exec'
-import { mapDetail, mapDetailToPullRequest, parsePrDetail, parseSearchResults, searchItemId } from './github-map'
-import type { GhPrDetail, GhSearchPr } from './github-map'
+import { mapDetail, mapDetailToPullRequest, parseGraphqlDetails, parseSearchResults, searchItemId } from './github-map'
+import type { GhPrDetail } from './github-map'
 
 export type { ExecFn } from './exec'
 
@@ -17,14 +17,17 @@ export interface SearchFilter {
 }
 
 export const SEARCH_FIELDS = 'number,title,repository,author,url,updatedAt,createdAt,isDraft,labels,state'
-export const DETAIL_FIELDS =
-  'number,title,body,url,author,headRefName,headRefOid,baseRefName,additions,deletions,changedFiles,state,isDraft,mergedAt,labels,createdAt,updatedAt,reviewRequests,reviewDecision'
-/** Watched PRs also need their conversation, to spot the author's reply. */
-export const DETAIL_WITH_COMMENTS_FIELDS = `${DETAIL_FIELDS},comments`
 const SEARCH_LIMIT = 50
-const DETAIL_CONCURRENCY = 4
+/** PRs per GraphQL call. GitHub charges per node asked for, so a batch this size stays under 30 points of the hourly 5000. */
+export const DETAIL_BATCH = 20
+const BATCH_CONCURRENCY = 3
+/** The newest comments are the ones a reply shows up in. */
+const COMMENTS_LAST = 50
+const LABELS_FIRST = 30
+const REVIEW_REQUESTS_FIRST = 30
 const DETAIL_CACHE_LIMIT = 500
 const GH_TIMEOUT_MS = 2 * 60_000
+const NAME = /^[A-Za-z0-9_.-]+$/
 
 /** Keeps gh quiet and non-interactive: no update nags, prompts, pager, or colour. */
 export const GH_ENV = {
@@ -58,10 +61,23 @@ async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T) 
   return results
 }
 
+const PR_FRAGMENT = `fragment Pr on PullRequest { number title body url author { login } headRefName headRefOid baseRefName additions deletions changedFiles state isDraft mergedAt createdAt updatedAt reviewDecision labels(first: ${LABELS_FIRST}) { nodes { name } } reviewRequests(first: ${REVIEW_REQUESTS_FIRST}) { nodes { requestedReviewer { ... on User { login } ... on Team { name slug } ... on Mannequin { login } ... on Bot { login } } } } }`
+const COMMENTS_FIELD = `comments(last: ${COMMENTS_LAST}) { nodes { author { login } body createdAt url } }`
+
+/** One query for a batch of PRs, aliased `p0`, `p1`, … in the order given. */
+export function detailsQuery(refs: readonly PullRequestRef[]): string {
+  const parts = refs.map((ref, i) => {
+    const [owner, name] = ref.fullName.split('/')
+    return `p${i}: repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) { pullRequest(number: ${ref.number}) { ...Pr ${ref.comments ? COMMENTS_FIELD : ''}} }`
+  })
+  return `query { ${parts.join(' ')} }\n${PR_FRAGMENT}`
+}
+
 /**
  * GitHub over the `gh` CLI, so the app rides on the user's existing login and
- * never handles a token. Detail payloads are cached by (id, updatedAt) so a
- * poll only re-fetches PRs that actually changed.
+ * never handles a token. Listings come from `gh search`, details from one
+ * GraphQL query per batch of PRs, cached by (id, updatedAt) so a poll only
+ * re-fetches PRs that actually changed.
  */
 export class GhCliGitHub implements GitHubPort {
   private readonly ghPath: string
@@ -93,26 +109,19 @@ export class GhCliGitHub implements GitHubPort {
   }
 
   /**
-   * Directly requested reviews plus reviews requested from any of my teams.
-   * Team searches are extra credit: a failing one is skipped rather than
-   * failing the poll.
+   * Directly requested reviews plus reviews requested from any of my teams,
+   * searched side by side. Team searches are extra credit: a failing one is
+   * skipped rather than failing the poll.
    */
   async listReviewRequested(): Promise<PullRequest[]> {
     const [direct, teams] = await Promise.all([this.search(['--review-requested=@me'], true), this.teams()])
+    const perTeam = await Promise.all(teams.map((team) => this.search([`team-review-requested:${team}`], true).catch((): PullRequest[] => [])))
     const seen = new Set(direct.map((p) => p.id))
     const merged = [...direct]
-    for (const team of teams) {
-      let prs: PullRequest[]
-      try {
-        prs = await this.search([`team-review-requested:${team}`], true)
-      } catch {
-        continue
-      }
-      for (const pr of prs) {
-        if (seen.has(pr.id)) continue
-        seen.add(pr.id)
-        merged.push(pr)
-      }
+    for (const pr of perTeam.flat()) {
+      if (seen.has(pr.id)) continue
+      seen.add(pr.id)
+      merged.push(pr)
     }
     return merged
   }
@@ -141,9 +150,23 @@ export class GhCliGitHub implements GitHubPort {
   }
 
   async getPullRequest(fullName: string, number: number, opts: { comments?: boolean } = {}): Promise<PullRequestDetail> {
-    const [me, detail] = await Promise.all([this.me(), this.fetchDetail(fullName, number, opts.comments)])
-    this.remember(prIdOf(fullName, number), detail.updatedAt, detail)
-    return opts.comments ? mapDetail(fullName, detail, { me }) : mapDetailToPullRequest(fullName, detail, { me })
+    const got = await this.getPullRequests([{ fullName, number, comments: opts.comments }])
+    const pr = got.get(prIdOf(fullName, number))
+    if (!pr) throw new Error(`${fullName}#${number} could not be read from GitHub`)
+    return pr
+  }
+
+  async getPullRequests(refs: readonly PullRequestRef[]): Promise<Map<string, PullRequestDetail>> {
+    const [me, details] = await Promise.all([this.me(), this.fetchDetails(refs)])
+    const out = new Map<string, PullRequestDetail>()
+    for (const ref of refs) {
+      const id = prIdOf(ref.fullName, ref.number)
+      const detail = details.get(id)
+      if (!detail || out.has(id)) continue
+      this.remember(id, detail.updatedAt, detail)
+      out.set(id, ref.comments ? mapDetail(ref.fullName, detail, { me }) : mapDetailToPullRequest(ref.fullName, detail, { me }))
+    }
+    return out
   }
 
   async getDiff(fullName: string, number: number): Promise<string> {
@@ -168,24 +191,41 @@ export class GhCliGitHub implements GitHubPort {
     const [me, out] = await Promise.all([this.me(), this.gh(args)])
     const inactive = new Set(inactiveRepos)
     const items = parseSearchResults(out).filter((item) => !inactive.has(item.repository.nameWithOwner))
-    const details = await mapLimit(items, DETAIL_CONCURRENCY, (item) => this.detailFor(item))
-    return items.map((item, i) =>
-      mapDetailToPullRequest(item.repository.nameWithOwner, details[i]!, { me, reviewRequested })
-    )
+    // The search index's stamp decides staleness: the detail's own may lag it by seconds.
+    const changed = items.filter((item) => this.details.get(searchItemId(item))?.updatedAt !== item.updatedAt)
+    const fetched = await this.fetchDetails(changed.map((item) => ({ fullName: item.repository.nameWithOwner, number: item.number })))
+    for (const item of changed) {
+      const detail = fetched.get(searchItemId(item))
+      if (detail) this.remember(searchItemId(item), item.updatedAt, detail)
+    }
+    const prs: PullRequest[] = []
+    for (const item of items) {
+      const detail = this.details.get(searchItemId(item))?.detail
+      // A PR the batch could not read (gone, or access lost) sits out until the next poll.
+      if (detail) prs.push(mapDetailToPullRequest(item.repository.nameWithOwner, detail, { me, reviewRequested }))
+    }
+    return prs
   }
 
-  private async detailFor(item: GhSearchPr): Promise<GhPrDetail> {
-    const id = searchItemId(item)
-    const cached = this.details.get(id)
-    if (cached && cached.updatedAt === item.updatedAt) return cached.detail
-    const detail = await this.fetchDetail(item.repository.nameWithOwner, item.number)
-    this.remember(id, item.updatedAt, detail)
-    return detail
-  }
-
-  private async fetchDetail(fullName: string, number: number, comments = false): Promise<GhPrDetail> {
-    const out = await this.gh(['pr', 'view', String(number), '--repo', fullName, '--json', comments ? DETAIL_WITH_COMMENTS_FIELDS : DETAIL_FIELDS])
-    return parsePrDetail(out)
+  /** Details for every readable ref, a batch per query and three queries at a time. */
+  private async fetchDetails(refs: readonly PullRequestRef[]): Promise<Map<string, GhPrDetail>> {
+    const wanted = new Map<string, PullRequestRef>()
+    for (const ref of refs) {
+      const [owner, name, ...rest] = ref.fullName.split('/')
+      if (!owner || !name || rest.length > 0 || !NAME.test(owner) || !NAME.test(name) || !Number.isInteger(ref.number)) continue
+      const id = prIdOf(ref.fullName, ref.number)
+      wanted.set(id, { fullName: ref.fullName, number: ref.number, comments: !!(wanted.get(id)?.comments || ref.comments) })
+    }
+    const list = [...wanted.values()]
+    const batches: PullRequestRef[][] = []
+    for (let i = 0; i < list.length; i += DETAIL_BATCH) batches.push(list.slice(i, i + DETAIL_BATCH))
+    const results = await mapLimit(batches, BATCH_CONCURRENCY, async (batch) => {
+      const out = await this.gh(['api', 'graphql', '-f', `query=${detailsQuery(batch)}`], { partial: true })
+      return parseGraphqlDetails(out, batch.map((ref, i) => ({ alias: `p${i}`, fullName: ref.fullName })))
+    })
+    const merged = new Map<string, GhPrDetail>()
+    for (const result of results) for (const [id, detail] of result) merged.set(id, detail)
+    return merged
   }
 
   private remember(id: string, updatedAt: string, detail: GhPrDetail): void {
@@ -197,7 +237,7 @@ export class GhCliGitHub implements GitHubPort {
     }
   }
 
-  private async gh(args: string[], opts: { input?: string } = {}): Promise<string> {
+  private async gh(args: string[], opts: { input?: string; partial?: boolean } = {}): Promise<string> {
     let res: ExecResult
     try {
       res = await this.exec(this.ghPath, args, { input: opts.input, env: GH_ENV, timeoutMs: GH_TIMEOUT_MS })
@@ -207,7 +247,8 @@ export class GhCliGitHub implements GitHubPort {
       }
       throw e
     }
-    if (res.code !== 0) throw ghError(args, res)
+    // A GraphQL batch with one unreadable PR exits 1 but still prints the rest; the parser keeps what resolved.
+    if (res.code !== 0 && !(opts.partial && res.stdout.trim().startsWith('{'))) throw ghError(args, res)
     return res.stdout
   }
 }

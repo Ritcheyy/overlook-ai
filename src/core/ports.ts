@@ -28,9 +28,18 @@ export interface GitHubPort {
   listMine(): Promise<PullRequest[]>
   /** Fresh detail for one PR (state, headSha, counts), with its conversation comments when asked. */
   getPullRequest(fullName: string, number: number, opts?: { comments?: boolean }): Promise<PullRequestDetail>
+  /** The same for many PRs in as few calls as the host allows, by PR id; a PR that cannot be read is left out. */
+  getPullRequests(refs: readonly PullRequestRef[]): Promise<Map<string, PullRequestDetail>>
   /** Unified diff of the PR against its base. */
   getDiff(fullName: string, number: number): Promise<string>
   postComment(fullName: string, number: number, body: string): Promise<{ url: string }>
+}
+
+/** One PR of a batch fetch; `comments` asks for its conversation as well. */
+export interface PullRequestRef {
+  fullName: string
+  number: number
+  comments?: boolean
 }
 
 export interface PullRequestDetail extends PullRequest {
