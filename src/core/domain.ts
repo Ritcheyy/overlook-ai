@@ -158,7 +158,7 @@ export interface RunOptions {
   model?: string
   effort?: '' | NonNullable<Settings['claudeEffort']>
   maxBudgetUsd?: number
-  /** Forces what the round reads; otherwise the delta, or the whole PR after a clean follow-up. */
+  /** Forces what the round reads; otherwise the delta, or the whole PR when nothing was pushed. */
   scope?: 'delta' | 'whole'
   /** Post the findings without stopping for triage. */
   autoPost?: boolean

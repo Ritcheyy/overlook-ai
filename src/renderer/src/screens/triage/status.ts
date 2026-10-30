@@ -1,7 +1,7 @@
 import type { Mission, Settings, Slot } from '@core/domain'
 import { lastPostedRound, latestRound, shortSha } from '@core/domain'
 import { autoFollowUpAllowed, followUpHeldBecause } from '@core/engine/poller'
-import { nextScope } from '@core/engine/scope'
+import { fullPassHold, nextScope } from '@core/engine/scope'
 import type { Tone } from '@/components/ui/Chip'
 import { relativeTime } from '@/lib/format'
 import { hasReply } from '@/lib/review'
@@ -18,6 +18,8 @@ export interface ReviewStatus {
   action: StatusAction
   /** What a re-run offered here would read; set with 'review_delta' and 'review_again'. */
   scope?: 'delta' | 'whole'
+  /** With a delta on offer: a clean one is followed by a full pass, or the PR's automatic full passes are used up. */
+  fullPass?: 'follows' | 'used_up'
 }
 
 function firstLine(text: string): string {
@@ -33,9 +35,11 @@ export function statusFor(mission: Mission | undefined, settings: Settings, slot
   const posted = lastPostedRound(mission)
   const author = mission.pr.author
   const head = shortSha(mission.pr.headSha)
-  // Said only after a push, where the delta would be the usual read; a round with nothing pushed always reads it all.
-  const scope = nextScope(mission, mission.pr.headSha, settings)
-  const whole = scope === 'whole' ? ' The next round reads the whole PR.' : ''
+  const scope = nextScope(mission, mission.pr.headSha)
+  // Said only after a push, where a delta is on offer; a round with nothing pushed always reads it all.
+  const hold = scope === 'delta' && posted ? fullPassHold(mission, mission.pr.headSha, settings) : 'off'
+  const fullPass = hold === undefined ? 'follows' : hold === 'used_up' ? 'used_up' : undefined
+  const whole = fullPass === 'follows' ? ' If the delta is clean, a full pass follows.' : fullPass === 'used_up' ? ' Automatic full passes are used up; tick "Read the whole PR" in the review options for another.' : ''
   switch (mission.state) {
     case 'queued':
       return { tone: 'muted', icon: 'queue', text: 'Queued. It starts when a reviewer is free.', action: 'cancel' }
@@ -47,7 +51,7 @@ export function statusFor(mission: Mission | undefined, settings: Settings, slot
       return { tone: 'accent', icon: 'work', text: 'Posting the comment to GitHub.', action: 'none' }
     case 'needs_you': {
       if (mission.error) return { tone: 'rose', icon: 'alert', text: firstLine(mission.error), action: 'none' }
-      if (mission.stale) return { tone: 'amber', icon: 'push', text: `${author} pushed ${head} after this round, so its findings may be out of date.${whole}`, action: 'review_delta', scope }
+      if (mission.stale) return { tone: 'amber', icon: 'push', text: `${author} pushed ${head} after this round, so its findings may be out of date.${whole}`, action: 'review_delta', scope, fullPass }
       const count = round?.findings.length ?? 0
       return {
         tone: 'amber',
@@ -63,10 +67,10 @@ export function statusFor(mission: Mission | undefined, settings: Settings, slot
       const since = posted ? `round ${posted.index}` : 'the last round'
       if (replied && mission.stale) {
         const held = autoFollowUpAllowed(mission, settings) ? 'A follow-up is about to start.' : followUpHeldBecause(mission, settings)
-        return { tone: 'teal', icon: 'reply', text: `${author} replied and pushed ${head}. ${held}${whole}`, action: 'review_delta', scope }
+        return { tone: 'teal', icon: 'reply', text: `${author} replied and pushed ${head}. ${held}${whole}`, action: 'review_delta', scope, fullPass }
       }
       if (replied) return { tone: 'teal', icon: 'reply', text: `${author} replied to ${since} without pushing. Review again reads the whole PR.`, action: 'review_again', scope }
-      if (mission.stale) return { tone: 'amber', icon: 'push', text: `${author} pushed ${head} after ${since}. ${followUpHeldBecause(mission, settings)}${whole}`, action: 'review_delta', scope }
+      if (mission.stale) return { tone: 'amber', icon: 'push', text: `${author} pushed ${head} after ${since}. ${followUpHeldBecause(mission, settings)}${whole}`, action: 'review_delta', scope, fullPass }
       const when = posted?.postedAt ? ` Round ${posted.index} was posted ${relativeTime(posted.postedAt, now)}.` : ''
       return { tone: 'teal', icon: 'watch', text: `Watching for ${author}'s reply.${when}`, action: 'review_again', scope }
     }

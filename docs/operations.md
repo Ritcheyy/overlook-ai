@@ -70,13 +70,14 @@ Review the delta by hand from the status line at any time; a manual round is als
 
 ### Full passes
 
-A delta round only reads the commits pushed since the last posted round, so on its own it cannot approve the whole change. Three rules keep the approval honest:
+A delta round only reads the commits pushed since the last posted round, so on its own it cannot approve the whole change. Every push gets a delta; these rules decide when the whole PR is read as well:
 
-- A round counts as clean when at most one of its findings is above nit. When a delta round comes back clean, the reviewer re-reads the whole PR in the same round before anything posts, with every earlier finding listed as already raised and the dropped ones as rejected. Its findings join the round's list, tagged "missed earlier" when they sit in code an earlier round had reviewed; nits and praise are left out. The posted comment says "Follow-up on a → b, then a full pass over the whole change."
-- The round after a clean follow-up reads the whole PR from the start, and so does a round started when nothing was pushed (there is no delta to read). The status line says so before you start one, and the Scope choice in the Review options forces either reading.
-- A full pass runs at most once per push, and a full pass never starts another, so a PR cannot loop.
+- A round counts as clean when at most one of its findings is above nit; nits and praise never count. When a delta comes back clean and the round before it was not (two or more posted findings above nit, or a full pass that failed), the reviewer re-reads the whole PR in the same round before anything posts, with every earlier finding listed as already raised and the dropped ones as rejected. Its findings join the round's list, tagged "missed earlier" when they sit in code an earlier round had reviewed; nits and praise are left out. The posted comment says "Follow-up on a → b, then a full pass over the whole change."
+- A PR that was already clean stays on deltas: a push that only fixes nits, or keeps a clean PR clean, never costs a full read. The full pass only comes back once a round posts real findings again.
+- A full pass runs at most once per push, never starts another, and a PR gets at most two automatic ones. After that only "Read the whole PR" in the Review options starts a full read, and the status line says so.
+- A round started when nothing was pushed reads the whole PR (there is no delta to read), and "Read the whole PR" forces a full read on any round, with earlier findings as already raised.
 
-A full pass costs what a first review costs, and a delta-plus-full round can spend up to twice the per-review budget, since the budget applies to each pass. Settings > General > "Full pass before approving" switches off both the in-round pass and the whole-PR round after a clean follow-up; a re-run with nothing pushed and the Scope choice still read the whole PR. If the full pass fails (budget, timeout), the delta findings stand, the verdict is capped at Comments, and the round offers "Retry the full pass", which starts a whole-PR round at the same head.
+The status line under a push says whether a clean delta would be followed by a full pass. A full pass costs what a first review costs, and a delta-plus-full round can spend up to twice the per-review budget, since the budget applies to each pass. Settings > General > "Full pass before approving" switches the chained pass off; a re-run with nothing pushed and "Read the whole PR" still read the whole PR. If the full pass fails (budget, timeout), the delta findings stand, the verdict is capped at Comments, and the round offers "Retry the full pass", which starts a whole-PR round at the same head.
 
 ## Notifications
 

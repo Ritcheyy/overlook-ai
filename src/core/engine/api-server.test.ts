@@ -11,6 +11,7 @@ import { DEMO_WORKSPACE_NOTES, DEMO_WORKSPACE_ROOT, FakeClock, MockNotifier, Moc
 import { MockRunner } from '../mocks/runner'
 import { MemoryStore } from '../mocks/store'
 import { MockWorktree } from '../mocks/worktree'
+import { makeFinding, makeMission, makeRound } from '../review/test-helpers'
 
 const PR_412 = 'acme/checkout-api#412'
 const PR_1203 = 'acme/storefront-web#1203'
@@ -664,34 +665,66 @@ describe('engine', () => {
     expect(h.runner.calls.map((c) => c.scope)).toEqual([undefined, 'delta'])
     expect(m.rounds[1].scope).toBe('delta')
     expect(m.rounds[1].summary).not.toContain('Full pass:')
-    // Off means off: the round after a clean follow-up reads the delta as well.
+    // Off means off: a later clean delta gets no full pass either.
     await approveAndPost(h, a.id)
     const third = await pushAndRerun(h, PR_412, a.id)
     expect(third.rounds[2].scope).toBe('delta')
   })
 
-  it('reads the whole PR on the round after a clean follow-up, and when nothing was pushed', async () => {
+  it('keeps to the delta after a clean round, and reads the whole PR when nothing was pushed', async () => {
     const h = await makeEngine()
     const a = await h.api.dispatch({ prId: PR_412 })
     await waitForState(h, a.id, 'needs_you')
     await approveAndPost(h, a.id)
     await pushAndRerun(h, PR_412, a.id)
     await approveAndPost(h, a.id)
+    // Round 2 posted one thing above nit, so the PR is clean: its next clean delta gets no full pass.
     const third = await pushAndRerun(h, PR_412, a.id)
-    expect(third.rounds[2].scope).toBe('whole')
-    expect(h.runner.calls.at(-1)).toMatchObject({ scope: 'whole' })
-    expect(h.runner.calls.at(-1)?.fullPassAfterDelta).toBeUndefined()
-    expect(h.runner.calls.at(-1)?.diff).toContain('diff --git')
-    expect(h.runner.calls).toHaveLength(4)
-    // A whole-change round keeps blocker, major and minor only, like the chained pass.
-    expect(third.rounds[2].findings.map((f) => f.title)).toEqual(['Refund amount is not validated against the order total'])
-    expect(third.rounds[2].findings[0].missedEarlier).toBe(true)
+    expect(third.rounds[2].scope).toBe('delta')
+    expect(h.runner.calls.map((c) => c.scope)).toEqual([undefined, 'delta', 'whole', 'delta'])
+    expect(third.timeline.some((e) => e.note === 'clean delta after a clean round; no full pass')).toBe(true)
     await approveAndPost(h, a.id)
     await h.api.rerunMission(a.id)
     const fourth = await waitForState(h, a.id, 'needs_you')
     expect(fourth.rounds[3].scope).toBe('whole')
     expect(fourth.rounds[3].headSha).toBe(fourth.rounds[2].headSha)
+    expect(h.runner.calls.at(-1)).toMatchObject({ scope: 'whole' })
+    expect(h.runner.calls.at(-1)?.fullPassAfterDelta).toBeUndefined()
+    expect(h.runner.calls.at(-1)?.diff).toContain('diff --git')
     expect(h.runner.calls).toHaveLength(5)
+    // A whole-change round keeps blocker, major and minor only, like the chained pass.
+    expect(fourth.rounds[3].findings.map((f) => f.title)).toEqual(['Refund amount is not validated against the order total'])
+    expect(fourth.rounds[3].findings[0].missedEarlier).toBe(true)
+  })
+
+  it('stops chaining full passes after two on one PR and says so', async () => {
+    const github = new MockGitHub()
+    const pr = (await github.listReviewRequested()).find((p) => p.id === PR_412)!
+    const majors = (prefix: string) => [makeFinding({ id: `${prefix}-a`, severity: 'major', decision: 'approved' }), makeFinding({ id: `${prefix}-b`, severity: 'major', decision: 'approved' })]
+    const round = (index: number, headSha: string, previousHeadSha?: string) =>
+      makeRound({
+        id: `r${index}`,
+        index,
+        headSha,
+        previousHeadSha,
+        ...(previousHeadSha && { scope: 'delta+whole' as const }),
+        postedAt: `2026-09-1${index}T12:00:00Z`,
+        postedCommentUrl: `https://github.com/acme/checkout-api/pull/412#issuecomment-${index}`,
+        findings: majors(`r${index}`)
+      })
+    const seeded = makeMission({ id: 'm-cap', pr, prId: pr.id, state: 'watching', rounds: [round(1, 'a'.repeat(40)), round(2, 'b'.repeat(40), 'a'.repeat(40)), round(3, pr.headSha, 'b'.repeat(40))] })
+    const settings = defaultSettings({ pollIntervalSec: 3600, maxAutoRoundsPerMission: 3 })
+    const h = await makeEngine({ github, store: new MemoryStore({ missions: [seeded], inbox: [], settings }) })
+    const m = await pushAndRerun(h, PR_412, seeded.id)
+    expect(m.rounds[3].scope).toBe('delta')
+    expect(h.runner.calls.map((c) => c.scope)).toEqual(['delta'])
+    expect(m.timeline.some((e) => e.note === 'clean delta; the 2 automatic full passes are used')).toBe(true)
+    // Read the whole PR in the Review options still starts one by hand.
+    await approveAndPost(h, seeded.id)
+    await h.api.rerunMission(seeded.id, undefined, { scope: 'whole' })
+    const after = await waitForState(h, seeded.id, 'needs_you')
+    expect(after.rounds[4].scope).toBe('whole')
+    expect(h.runner.calls.map((c) => c.scope)).toEqual(['delta', 'whole'])
   })
 
   it('keeps the delta findings and caps the verdict when the full pass fails, then retries just the full pass', async () => {
@@ -716,6 +749,22 @@ describe('engine', () => {
     expect(after.rounds).toHaveLength(3)
     expect(after.rounds[2]).toMatchObject({ scope: 'whole', verdict: 'comment', headSha: round.headSha })
     expect(h.runner.calls.at(-1)).toMatchObject({ scope: 'whole' })
+  })
+
+  it('reads the whole PR on the next clean delta when the posted round had a failed full pass', async () => {
+    const h = await makeEngine()
+    h.runner.failWholePass = new Error('timeout')
+    const a = await h.api.dispatch({ prId: PR_412 })
+    await waitForState(h, a.id, 'needs_you')
+    await approveAndPost(h, a.id)
+    const failed = await pushAndRerun(h, PR_412, a.id)
+    expect(failed.rounds[1].fullPassError).toBe('timeout')
+    // The user posts the capped round instead of retrying; the PR was never read in full after round 1's findings.
+    await approveAndPost(h, a.id)
+    h.runner.failWholePass = undefined
+    const next = await pushAndRerun(h, PR_412, a.id)
+    expect(h.runner.calls.map((c) => c.scope)).toEqual([undefined, 'delta', 'whole', 'delta', 'whole'])
+    expect(next.rounds[2].scope).toBe('delta+whole')
   })
 
   it('runs the full pass at most once per head', async () => {
